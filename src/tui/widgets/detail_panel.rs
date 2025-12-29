@@ -11,9 +11,7 @@ use crate::tui::colors;
 
 /// Render the detail panel widget
 pub fn render_detail_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default()
-        .title(" Details ")
-        .borders(Borders::ALL);
+    let block = Block::default().title(" Details ").borders(Borders::ALL);
 
     let Some(selected_idx) = app.list_state.selected() else {
         let empty = Paragraph::new("No worktree selected")
@@ -58,9 +56,10 @@ pub fn render_detail_panel(frame: &mut Frame, app: &App, area: Rect) {
             Span::raw(&worktree.commit_date),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Message:", Style::default().fg(colors::MUTED)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Message:",
+            Style::default().fg(colors::MUTED),
+        )]),
         Line::from(Span::raw(&worktree.commit_message)),
     ];
 

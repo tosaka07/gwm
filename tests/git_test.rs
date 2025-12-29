@@ -374,7 +374,10 @@ fn test_worktrees_have_unique_branches() {
     manager.create(&wt2_path, "unique-branch-2", None).unwrap();
 
     let worktrees = manager.list().unwrap();
-    let branches: Vec<_> = worktrees.iter().filter_map(|wt| wt.branch.as_ref()).collect();
+    let branches: Vec<_> = worktrees
+        .iter()
+        .filter_map(|wt| wt.branch.as_ref())
+        .collect();
 
     // All branches should be unique
     let unique_count = {

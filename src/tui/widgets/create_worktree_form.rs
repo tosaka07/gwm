@@ -11,7 +11,12 @@ use crate::tui::colors;
 use crate::tui::ui::centered_rect;
 
 /// Render the create worktree form dialog (Telescope/fzf style)
-pub fn render_create_worktree_form(frame: &mut Frame, app: &App, area: Rect, form: &CreateWorktreeForm) {
+pub fn render_create_worktree_form(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    form: &CreateWorktreeForm,
+) {
     let dialog_area = centered_rect(50, 60, area);
 
     // Clear background

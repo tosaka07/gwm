@@ -124,10 +124,7 @@ impl WorktreeManager {
 
         let commit = head.peel_to_commit()?;
         let commit_hash = commit.id().to_string();
-        let commit_message = commit
-            .summary()
-            .unwrap_or("")
-            .to_string();
+        let commit_message = commit.summary().unwrap_or("").to_string();
         let commit_author = commit.author().name().unwrap_or("").to_string();
 
         let time = commit.time();

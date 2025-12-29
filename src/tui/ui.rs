@@ -16,16 +16,20 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
     // Main layout: header, body, footer
-    let [header_area, body_area, footer_area] =
-        Layout::vertical([Constraint::Length(1), Constraint::Fill(1), Constraint::Length(1)])
-            .areas(area);
+    let [header_area, body_area, footer_area] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Fill(1),
+        Constraint::Length(1),
+    ])
+    .areas(area);
 
     // Render header
     render_header(frame, app, header_area);
 
     // Body layout: worktree list, detail panel
     let [list_area, detail_area] =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(body_area);
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .areas(body_area);
 
     // Render worktree list
     render_worktree_list(frame, app, list_area);
@@ -54,12 +58,17 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
 
     let header_text = Line::from(vec![
         Span::styled(title, Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" ".repeat(area.width.saturating_sub(title.len() as u16 + mode_str.len() as u16) as usize)),
+        Span::raw(
+            " ".repeat(
+                area.width
+                    .saturating_sub(title.len() as u16 + mode_str.len() as u16)
+                    as usize,
+            ),
+        ),
         Span::styled(mode_str, Style::default().fg(colors::PRIMARY)),
     ]);
 
-    let header = Paragraph::new(header_text)
-        .style(Style::default().bg(colors::BAR_BG));
+    let header = Paragraph::new(header_text).style(Style::default().bg(colors::BAR_BG));
 
     frame.render_widget(header, area);
 }
@@ -143,14 +152,21 @@ fn render_notifications(frame: &mut Frame, app: &App, area: Rect) {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border_color))
             .title(format!(" {} ", label))
-            .title_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD));
+            .title_style(
+                Style::default()
+                    .fg(border_color)
+                    .add_modifier(Modifier::BOLD),
+            );
 
         // Truncate message based on visible width
         let max_msg_len = visible_width.saturating_sub(4) as usize;
         let msg = if max_msg_len == 0 {
             String::new()
         } else if notification.message.len() > max_msg_len {
-            format!("{}...", &notification.message[..max_msg_len.saturating_sub(3)])
+            format!(
+                "{}...",
+                &notification.message[..max_msg_len.saturating_sub(3)]
+            )
         } else {
             notification.message.clone()
         };

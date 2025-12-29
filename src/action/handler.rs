@@ -124,7 +124,10 @@ impl ActionHandler {
                     match app.pending_operation {
                         Some(PendingOperation::Rebase) => {
                             // TODO: Implement actual rebase
-                            app.notify(Notification::info(format!("Rebase onto {} (not yet implemented)", branch)));
+                            app.notify(Notification::info(format!(
+                                "Rebase onto {} (not yet implemented)",
+                                branch
+                            )));
                             app.pending_operation = None;
                             app.dialog = DialogKind::None;
                             app.mode = Mode::Normal;
@@ -218,9 +221,7 @@ impl ActionHandler {
         terminal.suspend(|| {
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
 
-            let status = Command::new(&shell)
-                .current_dir(&path)
-                .status();
+            let status = Command::new(&shell).current_dir(&path).status();
 
             match status {
                 Ok(s) if s.success() => {}
@@ -344,7 +345,10 @@ impl ActionHandler {
                     match app.pending_operation {
                         Some(PendingOperation::Rebase) => {
                             // TODO: Implement actual rebase
-                            app.notify(Notification::info(format!("Rebase onto {} (not yet implemented)", branch)));
+                            app.notify(Notification::info(format!(
+                                "Rebase onto {} (not yet implemented)",
+                                branch
+                            )));
                             app.pending_operation = None;
                             app.dialog = DialogKind::None;
                             app.mode = Mode::Normal;
@@ -391,9 +395,13 @@ impl ActionHandler {
         // Create worktree
         let base_dir = app.config.worktree.base_dir.clone();
         let worktree_path = if let Some(template) = base_dir {
-            let path = template
-                .replace("{name}", &name)
-                .replace("{repo}", &app.repo_root.file_name().unwrap_or_default().to_string_lossy());
+            let path = template.replace("{name}", &name).replace(
+                "{repo}",
+                &app.repo_root
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy(),
+            );
 
             if path.starts_with('/') {
                 std::path::PathBuf::from(path)
@@ -405,9 +413,16 @@ impl ActionHandler {
         };
 
         // Use selected branch as base, create new branch with the given name
-        let base_branch = if branch.is_empty() { None } else { Some(branch.as_str()) };
+        let base_branch = if branch.is_empty() {
+            None
+        } else {
+            Some(branch.as_str())
+        };
 
-        match app.worktree_manager().create(&worktree_path, &name, base_branch) {
+        match app
+            .worktree_manager()
+            .create(&worktree_path, &name, base_branch)
+        {
             Ok(_) => {
                 app.notify(Notification::info(format!(
                     "Created worktree: {}",
@@ -446,7 +461,10 @@ impl ActionHandler {
                     println!("\nCommand completed successfully. Press Enter to continue...");
                 }
                 Ok(s) => {
-                    println!("\nCommand exited with status: {}. Press Enter to continue...", s);
+                    println!(
+                        "\nCommand exited with status: {}. Press Enter to continue...",
+                        s
+                    );
                 }
                 Err(e) => {
                     println!("\nFailed to run command: {}. Press Enter to continue...", e);

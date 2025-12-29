@@ -104,7 +104,10 @@ mod tests {
 
     #[test]
     fn test_action_from_str_input_navigation() {
-        assert_eq!(Action::from_str("MoveLineStart"), Some(Action::MoveLineStart));
+        assert_eq!(
+            Action::from_str("MoveLineStart"),
+            Some(Action::MoveLineStart)
+        );
         assert_eq!(Action::from_str("MoveLineEnd"), Some(Action::MoveLineEnd));
     }
 
@@ -115,10 +118,22 @@ mod tests {
     #[test]
     fn test_action_from_str_worktree_operations() {
         assert_eq!(Action::from_str("OpenShell"), Some(Action::OpenShell));
-        assert_eq!(Action::from_str("CreateWorktree"), Some(Action::CreateWorktree));
-        assert_eq!(Action::from_str("DeleteWorktree"), Some(Action::DeleteWorktree));
-        assert_eq!(Action::from_str("DeleteMergedWorktrees"), Some(Action::DeleteMergedWorktrees));
-        assert_eq!(Action::from_str("RebaseWorktree"), Some(Action::RebaseWorktree));
+        assert_eq!(
+            Action::from_str("CreateWorktree"),
+            Some(Action::CreateWorktree)
+        );
+        assert_eq!(
+            Action::from_str("DeleteWorktree"),
+            Some(Action::DeleteWorktree)
+        );
+        assert_eq!(
+            Action::from_str("DeleteMergedWorktrees"),
+            Some(Action::DeleteMergedWorktrees)
+        );
+        assert_eq!(
+            Action::from_str("RebaseWorktree"),
+            Some(Action::RebaseWorktree)
+        );
         assert_eq!(Action::from_str("Refresh"), Some(Action::Refresh));
     }
 
@@ -128,9 +143,18 @@ mod tests {
 
     #[test]
     fn test_action_from_str_mode_switching() {
-        assert_eq!(Action::from_str("EnterInsertMode"), Some(Action::EnterInsertMode));
-        assert_eq!(Action::from_str("EnterSearchMode"), Some(Action::EnterSearchMode));
-        assert_eq!(Action::from_str("EnterNormalMode"), Some(Action::EnterNormalMode));
+        assert_eq!(
+            Action::from_str("EnterInsertMode"),
+            Some(Action::EnterInsertMode)
+        );
+        assert_eq!(
+            Action::from_str("EnterSearchMode"),
+            Some(Action::EnterSearchMode)
+        );
+        assert_eq!(
+            Action::from_str("EnterNormalMode"),
+            Some(Action::EnterNormalMode)
+        );
     }
 
     // ===================

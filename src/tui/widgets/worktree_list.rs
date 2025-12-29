@@ -11,9 +11,7 @@ use crate::tui::colors;
 
 /// Render the worktree list widget
 pub fn render_worktree_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let block = Block::default()
-        .title(" Worktrees ")
-        .borders(Borders::ALL);
+    let block = Block::default().title(" Worktrees ").borders(Borders::ALL);
 
     let items: Vec<ListItem> = app
         .worktrees
@@ -27,10 +25,7 @@ pub fn render_worktree_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 } else {
                     Span::styled(" ", Style::default().fg(colors::PRIMARY))
                 },
-                Span::styled(
-                    branch_name,
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(branch_name, Style::default().add_modifier(Modifier::BOLD)),
                 if wt.is_main {
                     Span::styled(" (main)", Style::default().fg(colors::MAIN_TAG))
                 } else {
