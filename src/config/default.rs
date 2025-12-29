@@ -1,0 +1,70 @@
+use super::KeyBinding;
+
+/// Returns the default key bindings (Vim + Emacs style)
+pub fn default_bindings() -> Vec<KeyBinding> {
+    vec![
+        // === Navigation (Vim) ===
+        KeyBinding::new("j").with_mode("Normal|Dialog").with_action("MoveDown"),
+        KeyBinding::new("k").with_mode("Normal|Dialog").with_action("MoveUp"),
+        KeyBinding::new("l").with_mode("Dialog").with_action("Select"),
+        KeyBinding::new("h").with_mode("Normal|Dialog").with_action("Back"),
+        KeyBinding::new("g").with_mode("Normal|Dialog").with_action("MoveTop"),
+        KeyBinding::new("G").with_mode("Normal|Dialog").with_action("MoveBottom"),
+        KeyBinding::new("d").with_mods("Control").with_mode("Normal|Dialog").with_action("PageDown"),
+        KeyBinding::new("u").with_mods("Control").with_mode("Normal|Dialog").with_action("PageUp"),
+
+        // === Navigation (Emacs) ===
+        KeyBinding::new("n").with_mods("Control").with_mode("Normal|Dialog").with_action("MoveDown"),
+        KeyBinding::new("p").with_mods("Control").with_mode("Normal|Dialog").with_action("MoveUp"),
+        KeyBinding::new("f").with_mods("Control").with_mode("Dialog").with_action("Select"),
+        KeyBinding::new("b").with_mods("Control").with_mode("Normal|Dialog").with_action("Back"),
+        KeyBinding::new("<").with_mods("Alt").with_mode("Normal|Dialog").with_action("MoveTop"),
+        KeyBinding::new(">").with_mods("Alt").with_mode("Normal|Dialog").with_action("MoveBottom"),
+
+        // === Navigation (Arrow keys) ===
+        KeyBinding::new("Down").with_mode("Normal|Dialog").with_action("MoveDown"),
+        KeyBinding::new("Up").with_mode("Normal|Dialog").with_action("MoveUp"),
+        KeyBinding::new("Right").with_mode("Dialog").with_action("Select"),
+        KeyBinding::new("Left").with_mode("Normal|Dialog").with_action("Back"),
+        KeyBinding::new("Home").with_mode("Normal|Dialog").with_action("MoveTop"),
+        KeyBinding::new("End").with_mode("Normal|Dialog").with_action("MoveBottom"),
+        KeyBinding::new("PageDown").with_mode("Normal|Dialog").with_action("PageDown"),
+        KeyBinding::new("PageUp").with_mode("Normal|Dialog").with_action("PageUp"),
+
+        // === Input mode (Emacs) ===
+        KeyBinding::new("a").with_mods("Control").with_mode("Insert").with_action("MoveLineStart"),
+        KeyBinding::new("e").with_mods("Control").with_mode("Insert").with_action("MoveLineEnd"),
+        KeyBinding::new("a").with_mods("Control").with_mode("Search").with_action("MoveLineStart"),
+        KeyBinding::new("e").with_mods("Control").with_mode("Search").with_action("MoveLineEnd"),
+
+        // === Worktree operations (Normal mode only) ===
+        KeyBinding::new("Enter").with_mode("Normal").with_action("OpenShell"),
+        KeyBinding::new("c").with_mode("Normal").with_action("CreateWorktree"),
+        KeyBinding::new("d").with_mode("Normal").with_action("DeleteWorktree"),
+        KeyBinding::new("D").with_mode("Normal").with_action("DeleteMergedWorktrees"),
+        KeyBinding::new("r").with_mode("Normal").with_action("RebaseWorktree"),
+        KeyBinding::new("R").with_mode("Normal").with_action("Refresh"),
+
+        // === Mode switching ===
+        KeyBinding::new("/").with_mode("Normal").with_action("EnterSearchMode"),
+        KeyBinding::new("Escape").with_mode("Insert").with_action("EnterNormalMode"),
+        KeyBinding::new("Escape").with_mode("Search").with_action("EnterNormalMode"),
+        KeyBinding::new("Escape").with_mode("Dialog").with_action("Cancel"),
+        KeyBinding::new("c").with_mods("Control").with_mode("Insert").with_action("Cancel"),
+        KeyBinding::new("c").with_mods("Control").with_mode("Search").with_action("Cancel"),
+        KeyBinding::new("c").with_mods("Control").with_mode("Dialog").with_action("Cancel"),
+
+        // === Insert mode ===
+        KeyBinding::new("Enter").with_mode("Insert").with_action("Confirm"),
+
+        // === Dialog ===
+        KeyBinding::new("y").with_mode("Dialog").with_action("Confirm"),
+        KeyBinding::new("n").with_mode("Dialog").with_action("Cancel"),
+        KeyBinding::new("Enter").with_mode("Dialog").with_action("Confirm"),
+
+        // === Other ===
+        KeyBinding::new("?").with_mode("Normal").with_action("ToggleHelp"),
+        KeyBinding::new("q").with_mode("Normal").with_action("Quit"),
+        KeyBinding::new("c").with_mods("Control").with_mode("Normal").with_action("ForceQuit"),
+    ]
+}
