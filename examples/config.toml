@@ -1,0 +1,61 @@
+# gwm - Git Worktree Manager Configuration
+# Place this file at:
+#   - Global: ~/.config/gwm/config.toml (or $XDG_CONFIG_HOME/gwm/config.toml)
+#   - Local: .gwm/config.toml (in repository root)
+# Local config merges with global config (local overrides global)
+
+[worktree]
+# Directory template for new worktrees
+# Placeholders: {name} = branch name, {repo} = repository name
+# Examples:
+#   "../worktrees/{name}"           -> sibling directory
+#   "/tmp/worktrees/{repo}/{name}"  -> absolute path
+base_dir = "../worktrees/{name}"
+
+# Files/directories to copy when creating a new worktree (glob patterns)
+copy_files = [
+    ".env",
+    ".env.local",
+    ".env.development",
+    "node_modules",
+    ".venv",
+    "vendor",
+]
+
+# ========================================
+# Key Bindings (Alacritty-style)
+# ========================================
+# Default bindings (Vim + Emacs) are always enabled unless overridden
+# Use action = "None" to disable a default binding
+
+# Custom command example
+[[bindings]]
+key = "i"
+command = "pnpm install"
+
+[[bindings]]
+key = "b"
+command = "pnpm build"
+
+# Override default binding example
+# [[bindings]]
+# key = "j"
+# action = "None"  # Disable 'j' for MoveDown
+
+# ========================================
+# Hooks
+# ========================================
+# Events: pre_create, post_create, pre_delete, post_delete
+
+[[hooks]]
+event = "post_create"
+command = "pnpm install"
+
+# [[hooks]]
+# event = "post_create"
+# command = "cp ../.env .env"
+# cwd = "."  # Optional: working directory (default: target worktree)
+
+# [[hooks]]
+# event = "pre_delete"
+# command = "git stash"
