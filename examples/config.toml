@@ -23,24 +23,20 @@ copy_files = [
 ]
 
 # ========================================
-# Key Bindings (Alacritty-style)
+# Key Bindings
 # ========================================
 # Default bindings (Vim + Emacs) are always enabled unless overridden
 # Use action = "None" to disable a default binding
-
-# Custom command example
-[[bindings]]
-key = "i"
-command = "pnpm install"
-
-[[bindings]]
-key = "b"
-command = "pnpm build"
 
 # Override default binding example
 # [[bindings]]
 # key = "j"
 # action = "None"  # Disable 'j' for MoveDown
+
+# Remap example
+# [[bindings]]
+# key = "n"
+# action = "MoveDown"  # Use 'n' instead of 'j'
 
 # ========================================
 # Hooks
