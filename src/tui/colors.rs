@@ -32,8 +32,5 @@ pub const BAR_BG: Color = Color::Indexed(236); // Dark gray
 /// Main tag indicator
 pub const MAIN_TAG: Color = Color::Indexed(179); // Light goldenrod
 
-/// Border color for dialogs
-pub const BORDER: Color = Color::Indexed(243); // Gray
-
 /// Border color for focused/active elements
 pub const BORDER_FOCUS: Color = Color::Indexed(73); // Steel blue
