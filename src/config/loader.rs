@@ -377,6 +377,7 @@ pub fn load_config(custom_path: Option<&Path>) -> Result<Config, ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_config_default() {
@@ -748,6 +749,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_env_config_basedir() {
         // Save original value
         let original = std::env::var("GWM_WORKTREE_BASEDIR").ok();
@@ -764,6 +766,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_env_config_booleans() {
         // Save original values
         let orig_icons = std::env::var("GWM_UI_ICONS").ok();
@@ -788,6 +791,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_overrides_local() {
         // Save original value
         let original = std::env::var("GWM_WORKTREE_BASEDIR").ok();
@@ -814,6 +818,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_overrides_custom_config_path() {
         use std::fs;
 
@@ -985,6 +990,7 @@ mod tests {
     // ========== Global Config Path Tests ==========
 
     #[test]
+    #[serial]
     fn test_get_xdg_config_dir_from_env() {
         // Save original value
         let original = std::env::var("XDG_CONFIG_HOME").ok();
@@ -1002,6 +1008,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_xdg_config_dir_empty_env() {
         // Save original value
         let original = std::env::var("XDG_CONFIG_HOME").ok();
@@ -1021,6 +1028,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_xdg_config_dir_no_env() {
         // Save original value
         let original = std::env::var("XDG_CONFIG_HOME").ok();
@@ -1039,6 +1047,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_global_config_paths_order() {
         // Save original value
         let original = std::env::var("XDG_CONFIG_HOME").ok();
@@ -1065,6 +1074,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_global_config_paths_with_xdg_env() {
         // Save original value
         let original = std::env::var("XDG_CONFIG_HOME").ok();

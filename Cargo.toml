@@ -21,4 +21,5 @@ unicode-width = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+serial_test = "3"
 cargo-husky = { version = "1", default-features = false, features = ["precommit-hook", "run-cargo-fmt", "run-cargo-clippy"] }
