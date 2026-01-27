@@ -1,3 +1,4 @@
+use crate::git::RepoInfo;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -50,13 +51,27 @@ impl NamingConfig {
     }
 
     /// Generate worktree directory name from branch name using template
-    pub fn generate_worktree_name(&self, branch_name: &str) -> String {
-        let sanitized = self.sanitize(branch_name);
+    /// Supports variables: {branch}, {host}, {owner}, {repository}
+    pub fn generate_worktree_name(
+        &self,
+        branch_name: &str,
+        repo_info: Option<&RepoInfo>,
+    ) -> String {
+        let sanitized_branch = self.sanitize(branch_name);
 
         if let Some(template) = &self.template {
-            template.replace("{branch}", &sanitized)
+            let mut result = template.replace("{branch}", &sanitized_branch);
+
+            if let Some(info) = repo_info {
+                result = result
+                    .replace("{host}", &info.host)
+                    .replace("{owner}", &info.owner)
+                    .replace("{repository}", &info.repository);
+            }
+
+            result
         } else {
-            sanitized
+            sanitized_branch
         }
     }
 }
@@ -170,8 +185,30 @@ impl Config {
     }
 
     /// Get expanded worktree base directory
+    #[allow(dead_code)]
     pub fn worktree_basedir_expanded(&self) -> String {
         self.expand_path(&self.worktree_basedir())
+    }
+
+    /// Get expanded worktree base directory with repo root for relative paths
+    /// - Absolute paths and ~ paths are expanded normally
+    /// - Relative paths (starting with . or not starting with /) are resolved from repo_root
+    pub fn worktree_basedir_expanded_with_repo_root(&self, repo_root: &Path) -> String {
+        let basedir = self.worktree_basedir();
+
+        // Handle ~ expansion first
+        if basedir.starts_with("~/") {
+            return self.expand_path(&basedir);
+        }
+
+        // Absolute path - return as-is
+        if basedir.starts_with('/') {
+            return basedir;
+        }
+
+        // Relative path - resolve from repo_root
+        let resolved = repo_root.join(&basedir);
+        resolved.to_string_lossy().to_string()
     }
 
     /// Check if auto_mkdir is enabled (default: true)
@@ -180,8 +217,12 @@ impl Config {
     }
 
     /// Generate worktree directory name from branch name
-    pub fn generate_worktree_name(&self, branch_name: &str) -> String {
-        self.naming.generate_worktree_name(branch_name)
+    pub fn generate_worktree_name(
+        &self,
+        branch_name: &str,
+        repo_info: Option<&RepoInfo>,
+    ) -> String {
+        self.naming.generate_worktree_name(branch_name, repo_info)
     }
 
     /// Check if icons are enabled (default: true)
@@ -554,6 +595,70 @@ mod tests {
     }
 
     #[test]
+    fn test_worktree_basedir_expanded_with_repo_root_tilde() {
+        let config = Config::default(); // basedir = ~/worktrees
+        let repo_root = std::path::Path::new("/some/repo");
+
+        let expanded = config.worktree_basedir_expanded_with_repo_root(repo_root);
+
+        // ~ should be expanded to home, not relative to repo_root
+        assert!(!expanded.starts_with("~"));
+        assert!(expanded.ends_with("/worktrees"));
+        assert!(!expanded.starts_with("/some/repo"));
+    }
+
+    #[test]
+    fn test_worktree_basedir_expanded_with_repo_root_absolute() {
+        let config = Config {
+            worktree: WorktreeConfig {
+                basedir: Some("/absolute/path".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let repo_root = std::path::Path::new("/some/repo");
+
+        let expanded = config.worktree_basedir_expanded_with_repo_root(repo_root);
+
+        // Absolute path should remain unchanged
+        assert_eq!(expanded, "/absolute/path");
+    }
+
+    #[test]
+    fn test_worktree_basedir_expanded_with_repo_root_relative() {
+        let config = Config {
+            worktree: WorktreeConfig {
+                basedir: Some(".git/wt".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let repo_root = std::path::Path::new("/some/repo");
+
+        let expanded = config.worktree_basedir_expanded_with_repo_root(repo_root);
+
+        // Relative path should be resolved from repo_root
+        assert_eq!(expanded, "/some/repo/.git/wt");
+    }
+
+    #[test]
+    fn test_worktree_basedir_expanded_with_repo_root_parent_relative() {
+        let config = Config {
+            worktree: WorktreeConfig {
+                basedir: Some("../worktrees".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let repo_root = std::path::Path::new("/some/repo");
+
+        let expanded = config.worktree_basedir_expanded_with_repo_root(repo_root);
+
+        // Parent relative path should be resolved from repo_root
+        assert_eq!(expanded, "/some/repo/../worktrees");
+    }
+
+    #[test]
     fn test_compress_path_with_home() {
         let config = Config::default();
         let home = dirs::home_dir().unwrap();
@@ -743,7 +848,7 @@ mod tests {
     fn test_naming_generate_worktree_name_without_template() {
         let naming = NamingConfig::default();
 
-        let result = naming.generate_worktree_name("feature/login");
+        let result = naming.generate_worktree_name("feature/login", None);
 
         assert_eq!(result, "feature-login");
     }
@@ -755,7 +860,7 @@ mod tests {
             sanitize_chars: None,
         };
 
-        let result = naming.generate_worktree_name("feature/login");
+        let result = naming.generate_worktree_name("feature/login", None);
 
         assert_eq!(result, "wt-feature-login");
     }
@@ -767,7 +872,7 @@ mod tests {
             sanitize_chars: None,
         };
 
-        let result = naming.generate_worktree_name("main");
+        let result = naming.generate_worktree_name("main", None);
 
         assert_eq!(result, "main-dev");
     }
@@ -782,9 +887,47 @@ mod tests {
             ..Default::default()
         };
 
-        let result = config.generate_worktree_name("feature/test");
+        let result = config.generate_worktree_name("feature/test", None);
 
         assert_eq!(result, "worktree-feature-test");
+    }
+
+    #[test]
+    fn test_naming_generate_worktree_name_with_repo_info() {
+        use crate::git::RepoInfo;
+
+        let naming = NamingConfig {
+            template: Some("{host}/{owner}/{repository}/{branch}".to_string()),
+            sanitize_chars: None,
+        };
+        let repo_info = RepoInfo {
+            host: "github.com".to_string(),
+            owner: "user".to_string(),
+            repository: "myrepo".to_string(),
+        };
+
+        let result = naming.generate_worktree_name("feature/login", Some(&repo_info));
+
+        assert_eq!(result, "github.com/user/myrepo/feature-login");
+    }
+
+    #[test]
+    fn test_naming_generate_worktree_name_partial_repo_info() {
+        use crate::git::RepoInfo;
+
+        let naming = NamingConfig {
+            template: Some("{owner}-{repository}-{branch}".to_string()),
+            sanitize_chars: None,
+        };
+        let repo_info = RepoInfo {
+            host: "github.com".to_string(),
+            owner: "myorg".to_string(),
+            repository: "project".to_string(),
+        };
+
+        let result = naming.generate_worktree_name("main", Some(&repo_info));
+
+        assert_eq!(result, "myorg-project-main");
     }
 
     // ========== Global Config Path Tests ==========

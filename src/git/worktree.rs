@@ -64,6 +64,68 @@ pub struct WorktreeDetail {
     pub recent_commits: Vec<CommitInfo>,
 }
 
+/// Repository information extracted from remote URL
+#[derive(Debug, Clone, Default)]
+pub struct RepoInfo {
+    pub host: String,
+    pub owner: String,
+    pub repository: String,
+}
+
+impl RepoInfo {
+    /// Parse repository info from a remote URL
+    /// Supports:
+    /// - SSH: git@github.com:owner/repo.git
+    /// - HTTPS: https://github.com/owner/repo.git
+    /// - HTTPS with user: https://user@github.com/owner/repo.git
+    pub fn from_url(url: &str) -> Option<Self> {
+        let url = url.trim();
+
+        // SSH format: git@github.com:owner/repo.git
+        if url.starts_with("git@") {
+            let rest = url.strip_prefix("git@")?;
+            let (host, path) = rest.split_once(':')?;
+            let path = path.trim_end_matches(".git");
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() >= 2 {
+                return Some(Self {
+                    host: host.to_string(),
+                    owner: parts[0].to_string(),
+                    repository: parts[1..].join("/"),
+                });
+            }
+        }
+
+        // HTTPS format: https://github.com/owner/repo.git
+        if url.starts_with("https://") || url.starts_with("http://") {
+            let url = url
+                .strip_prefix("https://")
+                .or_else(|| url.strip_prefix("http://"))?;
+
+            // Remove user@ prefix if present
+            let url = if let Some(at_pos) = url.find('@') {
+                &url[at_pos + 1..]
+            } else {
+                url
+            };
+
+            let parts: Vec<&str> = url.split('/').collect();
+            if parts.len() >= 3 {
+                let host = parts[0].to_string();
+                let owner = parts[1].to_string();
+                let repo = parts[2..].join("/").trim_end_matches(".git").to_string();
+                return Some(Self {
+                    host,
+                    owner,
+                    repository: repo,
+                });
+            }
+        }
+
+        None
+    }
+}
+
 pub struct GitManager {
     repo: Repository,
     repo_root: PathBuf,
@@ -100,6 +162,14 @@ impl GitManager {
     #[allow(dead_code)]
     pub fn repo_root(&self) -> &PathBuf {
         &self.repo_root
+    }
+
+    /// Get repository info from origin remote URL
+    pub fn get_repo_info(&self) -> Option<RepoInfo> {
+        // Try to get origin remote
+        let remote = self.repo.find_remote("origin").ok()?;
+        let url = remote.url()?;
+        RepoInfo::from_url(url)
     }
 
     /// Get all worktrees
@@ -855,6 +925,66 @@ mod tests {
         // Should be "main" or "master"
         let branch = result.unwrap();
         assert!(branch == "main" || branch == "master");
+    }
+
+    // ========== RepoInfo Tests ==========
+
+    #[test]
+    fn test_repo_info_from_ssh_url() {
+        let url = "git@github.com:owner/repo.git";
+        let info = RepoInfo::from_url(url).unwrap();
+
+        assert_eq!(info.host, "github.com");
+        assert_eq!(info.owner, "owner");
+        assert_eq!(info.repository, "repo");
+    }
+
+    #[test]
+    fn test_repo_info_from_https_url() {
+        let url = "https://github.com/owner/repo.git";
+        let info = RepoInfo::from_url(url).unwrap();
+
+        assert_eq!(info.host, "github.com");
+        assert_eq!(info.owner, "owner");
+        assert_eq!(info.repository, "repo");
+    }
+
+    #[test]
+    fn test_repo_info_from_https_url_no_git_suffix() {
+        let url = "https://github.com/owner/repo";
+        let info = RepoInfo::from_url(url).unwrap();
+
+        assert_eq!(info.host, "github.com");
+        assert_eq!(info.owner, "owner");
+        assert_eq!(info.repository, "repo");
+    }
+
+    #[test]
+    fn test_repo_info_from_https_with_user() {
+        let url = "https://user@github.com/owner/repo.git";
+        let info = RepoInfo::from_url(url).unwrap();
+
+        assert_eq!(info.host, "github.com");
+        assert_eq!(info.owner, "owner");
+        assert_eq!(info.repository, "repo");
+    }
+
+    #[test]
+    fn test_repo_info_from_gitlab_url() {
+        let url = "git@gitlab.com:group/subgroup/project.git";
+        let info = RepoInfo::from_url(url).unwrap();
+
+        assert_eq!(info.host, "gitlab.com");
+        assert_eq!(info.owner, "group");
+        assert_eq!(info.repository, "subgroup/project");
+    }
+
+    #[test]
+    fn test_repo_info_invalid_url() {
+        let url = "not-a-valid-url";
+        let info = RepoInfo::from_url(url);
+
+        assert!(info.is_none());
     }
 
     // ========== find_merged_branches Tests ==========

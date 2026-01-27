@@ -316,7 +316,10 @@ impl App {
     }
 
     pub fn create_worktree(&mut self) -> Result<(), AppError> {
-        let base_path = self.config.worktree_basedir_expanded();
+        let base_path = self
+            .config
+            .worktree_basedir_expanded_with_repo_root(self.git.repo_root());
+        let repo_info = self.git.get_repo_info();
 
         // Auto-create base directory if enabled
         if self.config.auto_mkdir() {
@@ -336,7 +339,9 @@ impl App {
             }
 
             let branch_name = self.input.clone();
-            let worktree_name = self.config.generate_worktree_name(&branch_name);
+            let worktree_name = self
+                .config
+                .generate_worktree_name(&branch_name, repo_info.as_ref());
 
             // Create worktree with a new branch (atomic operation)
             let worktree = match self.git.create_worktree_with_new_branch(
@@ -392,7 +397,8 @@ impl App {
 
         // Use input as worktree name, or branch name if input is empty
         let worktree_name = if self.input.is_empty() {
-            self.config.generate_worktree_name(&branch_name)
+            self.config
+                .generate_worktree_name(&branch_name, repo_info.as_ref())
         } else {
             self.input.clone()
         };

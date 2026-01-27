@@ -108,6 +108,10 @@ Boolean values: `true`, `1`, `yes` or `false`, `0`, `no`
 [worktree]
 # Base directory for new worktrees
 # Default: "~/worktrees"
+# Supports:
+#   - Absolute paths: /path/to/worktrees
+#   - Home directory: ~/worktrees
+#   - Relative paths (from repo root): .git/wt, ../worktrees
 basedir = "~/worktrees"
 
 # Automatically create base directory if it doesn't exist
@@ -116,10 +120,12 @@ auto_mkdir = true
 
 [naming]
 # Directory naming template
-# Supports {branch} variable which is replaced with sanitized branch name
+# Supports variables: {branch}, {host}, {owner}, {repository}
+# These are extracted from the origin remote URL
 # Examples:
-#   "wt-{branch}"    -> feature/login becomes wt-feature-login
-#   "{branch}-dev"   -> main becomes main-dev
+#   "wt-{branch}"                          -> feature/login becomes wt-feature-login
+#   "{branch}-dev"                         -> main becomes main-dev
+#   "{host}/{owner}/{repository}/{branch}" -> ghq-style path (github.com/user/repo/main)
 template = "wt-{branch}"
 
 # Custom character replacements for branch names
@@ -156,23 +162,42 @@ setup_commands = [
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `basedir` | string | `"~/worktrees"` | Base directory for new worktrees |
+| `basedir` | string | `"~/worktrees"` | Base directory for new worktrees. Supports absolute, `~`, and relative paths |
 | `auto_mkdir` | bool | `true` | Automatically create base directory if it doesn't exist |
+
+**Path Examples:**
+
+| basedir | Result (repo at `/home/user/myrepo`) |
+|---------|--------------------------------------|
+| `~/worktrees` | `/home/user/worktrees` |
+| `/opt/worktrees` | `/opt/worktrees` |
+| `.git/wt` | `/home/user/myrepo/.git/wt` |
+| `../worktrees` | `/home/user/myrepo/../worktrees` |
 
 #### [naming]
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `template` | string | - | Directory naming template. Use `{branch}` as placeholder |
+| `template` | string | - | Directory naming template with variables |
 | `sanitize_chars` | map | `{ "/" = "-" }` | Character replacements for branch names |
+
+**Template Variables:**
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `{branch}` | Branch name (sanitized) | `feature-login` |
+| `{host}` | Git host from origin URL | `github.com` |
+| `{owner}` | Repository owner | `username` |
+| `{repository}` | Repository name | `myproject` |
 
 **Template Examples:**
 
-| Template | Branch | Result |
-|----------|--------|--------|
-| `wt-{branch}` | `feature/login` | `wt-feature-login` |
-| `{branch}-dev` | `main` | `main-dev` |
-| `worktree-{branch}` | `user/auth` | `worktree-user-auth` |
+| Template | Result |
+|----------|--------|
+| `wt-{branch}` | `wt-feature-login` |
+| `{branch}-dev` | `main-dev` |
+| `{host}/{owner}/{repository}/{branch}` | `github.com/user/repo/main` |
+| `{owner}-{repository}-{branch}` | `user-repo-feature-login` |
 
 #### [ui]
 
