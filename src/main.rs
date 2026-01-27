@@ -12,7 +12,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode},
 };
 use input::{handle_key_event, InputResult};
-use ratatui::{Terminal, backend::CrosstermBackend, Viewport};
+use ratatui::{backend::CrosstermBackend, Terminal, Viewport};
 use std::io::stdout;
 
 const INLINE_HEIGHT: u16 = 20;
@@ -77,7 +77,10 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_app(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>, app: &mut App) -> Result<()> {
+fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    app: &mut App,
+) -> Result<()> {
     loop {
         terminal.draw(|frame| ui::draw(frame, app))?;
 

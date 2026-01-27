@@ -83,6 +83,20 @@ impl GitManager {
         Ok(Self { repo, repo_root })
     }
 
+    /// Create GitManager from a specific path (for testing)
+    #[cfg(test)]
+    pub fn from_path(path: &Path) -> Result<Self, GitError> {
+        let repo = Repository::discover(path)?;
+
+        let repo_root = repo
+            .workdir()
+            .or_else(|| repo.path().parent())
+            .ok_or(GitError::PathError)?
+            .to_path_buf();
+
+        Ok(Self { repo, repo_root })
+    }
+
     #[allow(dead_code)]
     pub fn repo_root(&self) -> &PathBuf {
         &self.repo_root
@@ -200,7 +214,7 @@ impl GitManager {
         branch_name: &str,
         base_path: &str,
     ) -> Result<Worktree, GitError> {
-        let worktree_path = self.repo_root.parent().unwrap_or(&self.repo_root).join(base_path).join(name);
+        let worktree_path = self.repo_root.join(base_path).join(name);
 
         if worktree_path.exists() {
             return Err(GitError::WorktreeExists(name.to_string()));
@@ -286,12 +300,7 @@ impl GitManager {
     ) -> Result<Worktree, GitError> {
         use std::process::Command;
 
-        let worktree_path = self
-            .repo_root
-            .parent()
-            .unwrap_or(&self.repo_root)
-            .join(base_path)
-            .join(name);
+        let worktree_path = self.repo_root.join(base_path).join(name);
 
         if worktree_path.exists() {
             return Err(GitError::WorktreeExists(name.to_string()));
@@ -503,5 +512,513 @@ impl GitManager {
         }
 
         commits
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Builder for creating test git repositories with various configurations
+    pub struct TestRepoBuilder {
+        temp_dir: TempDir,
+        branches: Vec<String>,
+        merged_branches: Vec<String>,
+        commits: Vec<String>,
+    }
+
+    impl TestRepoBuilder {
+        pub fn new() -> Self {
+            let temp_dir = TempDir::new().unwrap();
+            let repo_path = temp_dir.path();
+
+            // Initialize git repo with explicit main branch
+            Command::new("git")
+                .args(["init", "-b", "main"])
+                .current_dir(repo_path)
+                .output()
+                .unwrap();
+
+            // Configure git user for commits
+            Command::new("git")
+                .args(["config", "user.email", "test@test.com"])
+                .current_dir(repo_path)
+                .output()
+                .unwrap();
+            Command::new("git")
+                .args(["config", "user.name", "Test User"])
+                .current_dir(repo_path)
+                .output()
+                .unwrap();
+
+            // Create initial commit on main branch
+            std::fs::write(repo_path.join("README.md"), "# Test").unwrap();
+            Command::new("git")
+                .args(["add", "."])
+                .current_dir(repo_path)
+                .output()
+                .unwrap();
+            Command::new("git")
+                .args(["commit", "-m", "Initial commit"])
+                .current_dir(repo_path)
+                .output()
+                .unwrap();
+
+            Self {
+                temp_dir,
+                branches: Vec::new(),
+                merged_branches: Vec::new(),
+                commits: Vec::new(),
+            }
+        }
+
+        /// Add a branch (not merged into main)
+        pub fn with_branch(mut self, name: &str) -> Self {
+            self.branches.push(name.to_string());
+            self
+        }
+
+        /// Add a branch that is merged into main
+        pub fn with_merged_branch(mut self, name: &str) -> Self {
+            self.merged_branches.push(name.to_string());
+            self
+        }
+
+        /// Add a commit on the current branch
+        pub fn with_commit(mut self, message: &str) -> Self {
+            self.commits.push(message.to_string());
+            self
+        }
+
+        /// Build the repository and return TempDir and GitManager
+        pub fn build(self) -> (TempDir, GitManager) {
+            let repo_path = self.temp_dir.path();
+
+            // Create unmerged branches
+            for branch_name in &self.branches {
+                // Create and checkout branch
+                Command::new("git")
+                    .args(["checkout", "-b", branch_name])
+                    .current_dir(repo_path)
+                    .output()
+                    .unwrap();
+
+                // Add a unique commit so branch is ahead
+                let file_name = format!("{}.txt", branch_name);
+                std::fs::write(repo_path.join(&file_name), branch_name).unwrap();
+                Command::new("git")
+                    .args(["add", "."])
+                    .current_dir(repo_path)
+                    .output()
+                    .unwrap();
+                Command::new("git")
+                    .args(["commit", "-m", &format!("Commit on {}", branch_name)])
+                    .current_dir(repo_path)
+                    .output()
+                    .unwrap();
+
+                // Go back to main
+                Command::new("git")
+                    .args(["checkout", "main"])
+                    .current_dir(repo_path)
+                    .output()
+                    .unwrap();
+            }
+
+            // Create merged branches
+            for branch_name in &self.merged_branches {
+                // Create and checkout branch
+                Command::new("git")
+                    .args(["checkout", "-b", branch_name])
+                    .current_dir(repo_path)
+                    .output()
+                    .unwrap();
+
+                // Add a commit on the feature branch
+                let file_name = format!("{}.txt", branch_name);
+                std::fs::write(repo_path.join(&file_name), branch_name).unwrap();
+                Command::new("git")
+                    .args(["add", "."])
+                    .current_dir(repo_path)
+                    .output()
+                    .unwrap();
+                Command::new("git")
+                    .args(["commit", "-m", &format!("Feature on {}", branch_name)])
+                    .current_dir(repo_path)
+                    .output()
+                    .unwrap();
+
+                // Go back to main and merge
+                Command::new("git")
+                    .args(["checkout", "main"])
+                    .current_dir(repo_path)
+                    .output()
+                    .unwrap();
+
+                Command::new("git")
+                    .args([
+                        "merge",
+                        branch_name,
+                        "--no-ff",
+                        "-m",
+                        &format!("Merge {}", branch_name),
+                    ])
+                    .current_dir(repo_path)
+                    .output()
+                    .unwrap();
+            }
+
+            // Add additional commits if specified
+            for message in &self.commits {
+                let file_name = format!("{}.txt", message.replace(" ", "_"));
+                std::fs::write(repo_path.join(&file_name), message).unwrap();
+                Command::new("git")
+                    .args(["add", "."])
+                    .current_dir(repo_path)
+                    .output()
+                    .unwrap();
+                Command::new("git")
+                    .args(["commit", "-m", message])
+                    .current_dir(repo_path)
+                    .output()
+                    .unwrap();
+            }
+
+            // Change to repo directory and create GitManager
+            std::env::set_current_dir(repo_path).unwrap();
+            let git_manager = GitManager::from_path(repo_path).unwrap();
+
+            (self.temp_dir, git_manager)
+        }
+    }
+
+    /// Helper to create a test git repository (backward compatible)
+    fn setup_test_repo() -> (TempDir, GitManager) {
+        TestRepoBuilder::new().build()
+    }
+
+    #[test]
+    fn test_list_worktrees_returns_main() {
+        let (_temp_dir, git) = setup_test_repo();
+
+        let worktrees = git.list_worktrees().unwrap();
+
+        assert!(!worktrees.is_empty());
+        assert!(worktrees.iter().any(|w| w.is_main));
+    }
+
+    #[test]
+    fn test_list_branches() {
+        let (_temp_dir, git) = setup_test_repo();
+
+        let branches = git.list_branches().unwrap();
+
+        assert!(!branches.is_empty());
+        // Should have at least one local branch (main or master)
+        assert!(branches.iter().any(|b| !b.is_remote));
+    }
+
+    #[test]
+    fn test_create_worktree_with_existing_branch() {
+        let (temp_dir, git) = setup_test_repo();
+        let repo_path = temp_dir.path();
+
+        // Create a new branch first
+        Command::new("git")
+            .args(["branch", "feature-test"])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+
+        // Create worktree with existing branch
+        let result = git.create_worktree("test-wt", "feature-test", ".");
+
+        assert!(result.is_ok());
+        let worktree = result.unwrap();
+        assert_eq!(worktree.name, "test-wt");
+        assert_eq!(worktree.branch, Some("feature-test".to_string()));
+        assert!(!worktree.is_main);
+    }
+
+    #[test]
+    fn test_create_worktree_with_new_branch() {
+        let (_temp_dir, git) = setup_test_repo();
+
+        // Create worktree with new branch
+        let result = git.create_worktree_with_new_branch("new-wt", "new-feature", ".");
+
+        assert!(result.is_ok());
+        let worktree = result.unwrap();
+        assert_eq!(worktree.name, "new-wt");
+        assert_eq!(worktree.branch, Some("new-feature".to_string()));
+        assert!(!worktree.is_main);
+
+        // Verify branch was created
+        let branches = git.list_branches().unwrap();
+        assert!(branches.iter().any(|b| b.name == "new-feature"));
+    }
+
+    #[test]
+    fn test_create_worktree_with_new_branch_already_exists() {
+        let (temp_dir, git) = setup_test_repo();
+        let repo_path = temp_dir.path();
+
+        // Create a branch first
+        Command::new("git")
+            .args(["branch", "existing-branch"])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+
+        // Try to create worktree with same branch name - should fail
+        let result = git.create_worktree_with_new_branch("wt", "existing-branch", ".");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_delete_worktree() {
+        let (temp_dir, git) = setup_test_repo();
+        let repo_path = temp_dir.path();
+
+        // Create a branch and worktree
+        Command::new("git")
+            .args(["branch", "to-delete"])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+        git.create_worktree("delete-wt", "to-delete", ".").unwrap();
+
+        // Delete the worktree
+        let result = git.delete_worktree("delete-wt");
+
+        assert!(result.is_ok());
+
+        // Verify worktree is gone
+        let worktrees = git.list_worktrees().unwrap();
+        assert!(!worktrees.iter().any(|w| w.name == "delete-wt"));
+    }
+
+    #[test]
+    fn test_delete_branch() {
+        let (temp_dir, git) = setup_test_repo();
+        let repo_path = temp_dir.path();
+
+        // Create a branch
+        Command::new("git")
+            .args(["branch", "branch-to-delete"])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+
+        // Delete the branch
+        let result = git.delete_branch("branch-to-delete");
+
+        assert!(result.is_ok());
+
+        // Verify branch is gone
+        let branches = git.list_branches().unwrap();
+        assert!(!branches.iter().any(|b| b.name == "branch-to-delete"));
+    }
+
+    #[test]
+    fn test_delete_branch_not_found() {
+        let (_temp_dir, git) = setup_test_repo();
+
+        let result = git.delete_branch("nonexistent-branch");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_changed_files_summary_is_empty() {
+        let summary = ChangedFilesSummary::default();
+        assert!(summary.is_empty());
+
+        let summary_with_added = ChangedFilesSummary {
+            added: 1,
+            deleted: 0,
+            modified: 0,
+        };
+        assert!(!summary_with_added.is_empty());
+    }
+
+    #[test]
+    fn test_get_default_branch() {
+        let (_temp_dir, git) = setup_test_repo();
+
+        let result = git.get_default_branch();
+
+        assert!(result.is_ok());
+        // Should be "main" or "master"
+        let branch = result.unwrap();
+        assert!(branch == "main" || branch == "master");
+    }
+
+    // ========== find_merged_branches Tests ==========
+
+    #[test]
+    fn test_find_merged_branches_returns_merged_branch() {
+        let (_temp_dir, git) = TestRepoBuilder::new()
+            .with_merged_branch("feature-merged")
+            .build();
+
+        let merged = git.find_merged_branches().unwrap();
+
+        assert!(merged.contains(&"feature-merged".to_string()));
+    }
+
+    #[test]
+    fn test_find_merged_branches_excludes_unmerged_branch() {
+        let (_temp_dir, git) = TestRepoBuilder::new()
+            .with_branch("feature-unmerged")
+            .build();
+
+        let merged = git.find_merged_branches().unwrap();
+
+        assert!(!merged.contains(&"feature-unmerged".to_string()));
+    }
+
+    #[test]
+    fn test_find_merged_branches_excludes_default_branch() {
+        let (_temp_dir, git) = TestRepoBuilder::new()
+            .with_merged_branch("feature-merged")
+            .build();
+
+        let merged = git.find_merged_branches().unwrap();
+        let default_branch = git.get_default_branch().unwrap();
+
+        // Default branch should not be in merged list
+        assert!(!merged.contains(&default_branch));
+    }
+
+    #[test]
+    fn test_find_merged_branches_with_no_other_branches() {
+        let (_temp_dir, git) = TestRepoBuilder::new().build();
+
+        let merged = git.find_merged_branches().unwrap();
+
+        assert!(merged.is_empty());
+    }
+
+    #[test]
+    fn test_find_merged_branches_mixed_branches() {
+        let (_temp_dir, git) = TestRepoBuilder::new()
+            .with_merged_branch("merged-1")
+            .with_merged_branch("merged-2")
+            .with_branch("unmerged-1")
+            .build();
+
+        let merged = git.find_merged_branches().unwrap();
+
+        assert!(merged.contains(&"merged-1".to_string()));
+        assert!(merged.contains(&"merged-2".to_string()));
+        assert!(!merged.contains(&"unmerged-1".to_string()));
+        assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn test_find_merged_worktrees_returns_worktrees_with_merged_branch() {
+        let (temp_dir, git) = TestRepoBuilder::new()
+            .with_merged_branch("merged-feature")
+            .build();
+
+        // Create a worktree with the merged branch
+        let repo_path = temp_dir.path();
+        Command::new("git")
+            .args(["worktree", "add", "wt-merged", "merged-feature"])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+
+        let merged_worktrees = git.find_merged_worktrees().unwrap();
+
+        assert!(!merged_worktrees.is_empty());
+        assert!(merged_worktrees.iter().any(|wt| wt.name == "wt-merged"));
+    }
+
+    #[test]
+    fn test_find_merged_worktrees_excludes_unmerged() {
+        let (temp_dir, git) = TestRepoBuilder::new()
+            .with_branch("unmerged-feature")
+            .build();
+
+        // Create a worktree with an unmerged branch
+        let repo_path = temp_dir.path();
+        Command::new("git")
+            .args(["worktree", "add", "wt-unmerged", "unmerged-feature"])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+
+        let merged_worktrees = git.find_merged_worktrees().unwrap();
+
+        assert!(merged_worktrees.is_empty());
+    }
+
+    #[test]
+    fn test_find_merged_worktrees_excludes_main() {
+        let (_temp_dir, git) = TestRepoBuilder::new()
+            .with_merged_branch("merged-feature")
+            .build();
+
+        let merged_worktrees = git.find_merged_worktrees().unwrap();
+
+        // Main worktree should never be in merged worktrees
+        assert!(merged_worktrees.iter().all(|wt| !wt.is_main));
+    }
+
+    // ========== Error Cases Tests ==========
+
+    #[test]
+    fn test_delete_worktree_not_found() {
+        let (_temp_dir, git) = setup_test_repo();
+
+        let result = git.delete_worktree("nonexistent-worktree");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_create_worktree_branch_not_found() {
+        let (_temp_dir, git) = setup_test_repo();
+
+        let result = git.create_worktree("test-wt", "nonexistent-branch", ".");
+
+        assert!(result.is_err());
+        match result {
+            Err(GitError::BranchNotFound(name)) => {
+                assert_eq!(name, "nonexistent-branch");
+            }
+            _ => panic!("Expected BranchNotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_create_worktree_already_exists() {
+        let (temp_dir, git) = setup_test_repo();
+        let repo_path = temp_dir.path();
+
+        // Create a branch
+        Command::new("git")
+            .args(["branch", "test-branch"])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+
+        // Create directory manually to simulate existing worktree
+        std::fs::create_dir(repo_path.join("existing-wt")).unwrap();
+
+        let result = git.create_worktree("existing-wt", "test-branch", ".");
+
+        assert!(result.is_err());
+        match result {
+            Err(GitError::WorktreeExists(name)) => {
+                assert_eq!(name, "existing-wt");
+            }
+            _ => panic!("Expected WorktreeExists error"),
+        }
     }
 }
