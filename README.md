@@ -37,8 +37,16 @@ A fast and intuitive TUI application for managing git worktrees.
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
 ```bash
-cargo install --path .
+brew install tosaka07/tap/gwm
+```
+
+### Cargo
+
+```bash
+cargo install --git https://github.com/tosaka07/gwm
 ```
 
 ## Usage
