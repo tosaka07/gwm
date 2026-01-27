@@ -6,6 +6,7 @@ mod input;
 mod ui;
 
 use app::App;
+use clap::Parser;
 use color_eyre::eyre::Result;
 use crossterm::{
     event::{self, Event, KeyEventKind},
@@ -14,14 +15,27 @@ use crossterm::{
 use input::{handle_key_event, InputResult};
 use ratatui::{backend::CrosstermBackend, Terminal, Viewport};
 use std::io::stdout;
+use std::path::PathBuf;
+
+/// Git Worktree Manager - A TUI application for managing git worktrees
+#[derive(Parser)]
+#[command(name = "gwm")]
+#[command(version, about, long_about = None)]
+struct Cli {
+    /// Path to config file
+    #[arg(short, long, value_name = "FILE")]
+    config: Option<PathBuf>,
+}
 
 const INLINE_HEIGHT: u16 = 20;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
 
+    let cli = Cli::parse();
+
     // Load configuration
-    let config = config::load_config().unwrap_or_default();
+    let config = config::load_config(cli.config.as_deref()).unwrap_or_default();
 
     // Initialize git manager
     let git = match git::GitManager::new() {

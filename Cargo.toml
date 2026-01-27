@@ -1,11 +1,12 @@
 [package]
 name = "gwm"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Git Worktree Manager - A TUI application for managing git worktrees"
 license = "MIT"
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 ratatui = "0.30"
 crossterm = "0.28"
 git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }

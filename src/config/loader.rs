@@ -348,14 +348,28 @@ fn parse_bool(s: &str) -> Option<bool> {
     }
 }
 
+/// Load config from a specific file path
+fn load_config_from_path(path: &Path) -> Result<Config, ConfigError> {
+    let content = std::fs::read_to_string(path)?;
+    let config: Config = toml::from_str(&content)?;
+    Ok(config)
+}
+
 /// Load and merge configs (global + local + env)
-/// Priority: env > local > global
-pub fn load_config() -> Result<Config, ConfigError> {
+/// Priority: env > custom/local > global
+/// If custom_path is provided, it replaces both global and local config
+pub fn load_config(custom_path: Option<&Path>) -> Result<Config, ConfigError> {
+    let env = load_env_config();
+
+    if let Some(path) = custom_path {
+        let custom = load_config_from_path(path)?;
+        return Ok(custom.merge(env));
+    }
+
     let current_dir = std::env::current_dir()?;
 
     let global = load_global_config()?.unwrap_or_default();
     let local = load_local_config(&current_dir)?.unwrap_or_default();
-    let env = load_env_config();
 
     Ok(global.merge(local).merge(env))
 }
@@ -799,6 +813,44 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_env_overrides_custom_config_path() {
+        use std::fs;
+
+        // Save original value
+        let original = std::env::var("GWM_WORKTREE_BASEDIR").ok();
+
+        // Create temp config file
+        let temp_dir = std::env::temp_dir().join("gwm_test_env_override_custom");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let config_path = temp_dir.join("custom.toml");
+        let config_content = r#"
+            [worktree]
+            basedir = "/from-custom-file"
+        "#;
+        fs::write(&config_path, config_content).unwrap();
+
+        // Set env var
+        std::env::set_var("GWM_WORKTREE_BASEDIR", "/from-env");
+
+        // Load config with custom path
+        let config = load_config(Some(&config_path)).unwrap();
+
+        // Env should override custom config
+        assert_eq!(config.worktree.basedir, Some("/from-env".to_string()));
+
+        // Restore original value
+        match original {
+            Some(v) => std::env::set_var("GWM_WORKTREE_BASEDIR", v),
+            None => std::env::remove_var("GWM_WORKTREE_BASEDIR"),
+        }
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
     // ========== NamingConfig Tests ==========
 
     #[test]
@@ -1106,5 +1158,53 @@ mod tests {
 
         // Clean up
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_config_from_custom_path() {
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join("gwm_test_custom_config");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let config_path = temp_dir.join("custom.toml");
+        let config_content = r#"
+            [worktree]
+            basedir = "~/custom-worktrees"
+            auto_mkdir = false
+
+            [ui]
+            icons = false
+            tilde_home = true
+        "#;
+        fs::write(&config_path, config_content).unwrap();
+
+        let config = load_config(Some(&config_path)).unwrap();
+
+        assert_eq!(
+            config.worktree.basedir,
+            Some("~/custom-worktrees".to_string())
+        );
+        assert_eq!(config.worktree.auto_mkdir, Some(false));
+        assert_eq!(config.ui.icons, Some(false));
+        assert_eq!(config.ui.tilde_home, Some(true));
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_config_from_custom_path_not_found() {
+        let result = load_config(Some(Path::new("/nonexistent/path/config.toml")));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_config_without_custom_path() {
+        // When no custom path is provided, should not error (uses default loading)
+        let result = load_config(None);
+        // This should succeed (returns default if no config found)
+        assert!(result.is_ok());
     }
 }
