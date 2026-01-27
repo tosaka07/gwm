@@ -57,14 +57,19 @@ CHANGELOG.md を以下のフォーマットで生成または先頭に追記し�
 
 ### Fixed
 - バグ修正
+
+### Chore
+- ドキュメント、CI、その他の変更
 ```
 
-コミットメッセージの分類ルール：
-- `feat:`, `add:` → Added
-- `fix:`, `bugfix:` → Fixed
-- `refactor:`, `change:`, `update:`, `style:` → Changed
-- `docs:` → Documentation
-- `ci:`, `chore:` → 基本的に含めない（重要なものは Changed へ）
+コミットメッセージの分類ルール（**本コマンド gwm に影響するもののみ** Added/Changed/Fixed に分類）：
+- `feat:`, `add:` → Added（gwm本体の新機能のみ）
+- `fix:`, `bugfix:` → Fixed（gwm本体のバグ修正のみ）
+- `refactor:`, `change:`, `update:` → Changed（gwm本体の変更のみ）
+- `docs:`, `ci:`, `chore:`, `style:`, `test:` → Chore
+- スキル追加、ドキュメント更新、CI変更など → Chore
+
+**重要**: gwm本体のコード（src/配下）に影響しない変更は全て Chore に分類する
 
 ### 4. Cargo.lock の更新
 
