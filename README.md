@@ -115,8 +115,16 @@ basedir = "~/worktrees"
 auto_mkdir = true
 
 [naming]
-# Directory naming template (reserved for future use)
-# template = "{branch}"
+# Directory naming template
+# Supports {branch} variable which is replaced with sanitized branch name
+# Examples:
+#   "wt-{branch}"    -> feature/login becomes wt-feature-login
+#   "{branch}-dev"   -> main becomes main-dev
+template = "wt-{branch}"
+
+# Custom character replacements for branch names
+# Default: { "/" = "-" }
+# sanitize_chars = { "/" = "_", ":" = "-" }
 
 [ui]
 # Show icons in output (requires NerdFont)
@@ -131,8 +139,8 @@ tilde_home = true
 [[repository_settings]]
 repository = "~/src/my-project"
 
-# Files to copy from main worktree after creating (reserved for future use)
-# copy_files = [".env", ".env.local"]
+# Files to copy from main worktree after creating
+copy_files = [".env", ".env.local"]
 
 # Commands to run after creating a worktree
 # Available variables: $WORKTREE_NAME, $WORKTREE_PATH, $WORKTREE_BRANCH
@@ -151,6 +159,21 @@ setup_commands = [
 | `basedir` | string | `"~/worktrees"` | Base directory for new worktrees |
 | `auto_mkdir` | bool | `true` | Automatically create base directory if it doesn't exist |
 
+#### [naming]
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `template` | string | - | Directory naming template. Use `{branch}` as placeholder |
+| `sanitize_chars` | map | `{ "/" = "-" }` | Character replacements for branch names |
+
+**Template Examples:**
+
+| Template | Branch | Result |
+|----------|--------|--------|
+| `wt-{branch}` | `feature/login` | `wt-feature-login` |
+| `{branch}-dev` | `main` | `main-dev` |
+| `worktree-{branch}` | `user/auth` | `worktree-user-auth` |
+
 #### [ui]
 
 | Parameter | Type | Default | Description |
@@ -163,8 +186,8 @@ setup_commands = [
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `repository` | string | - | Repository path (used as key for matching) |
+| `copy_files` | string[] | - | Files to copy from main worktree to new worktree |
 | `setup_commands` | string[] | - | Commands to run after creating a worktree |
-| `copy_files` | string[] | - | Files to copy from main worktree (reserved) |
 
 ### Setup Command Variables
 
