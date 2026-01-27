@@ -53,7 +53,28 @@ cargo install --git https://github.com/tosaka07/gwm
 
 ```bash
 # Run in any git repository
+# Opens a subshell in the selected worktree directory
 gwm
+
+# Print selected worktree path to stdout (for shell integration)
+gwm -p
+gwm --print-path
+```
+
+### Shell Integration
+
+By default, `gwm` opens a subshell in the selected worktree directory. When you exit the subshell (`exit` or `Ctrl-D`), you return to the original directory.
+
+If you prefer to change the current shell's directory instead, use the `-p` flag with a shell function:
+
+```bash
+# Add to your .bashrc or .zshrc
+gwt() {
+  local path=$(gwm --print-path)
+  if [ -n "$path" ]; then
+    cd "$path"
+  fi
+}
 ```
 
 ## Keybindings
