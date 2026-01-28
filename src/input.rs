@@ -77,8 +77,8 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) -> InputResult {
             InputResult::Continue
         }
 
-        // Prune (Ctrl+Shift+D)
-        (KeyCode::Char('D'), KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+        // Prune (D - only when not searching)
+        (KeyCode::Char('D'), _) if app.input.is_empty() => {
             if let Err(e) = app.enter_confirm_prune() {
                 app.message = Some(format!("Error: {}", e));
             }
@@ -91,8 +91,8 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) -> InputResult {
             InputResult::Continue
         }
 
-        // Text input for search
-        (KeyCode::Char(c), KeyModifiers::NONE) => {
+        // Text input for search (include SHIFT for uppercase)
+        (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
             app.input_char(c);
             InputResult::Continue
         }
@@ -240,6 +240,10 @@ mod tests {
 
     fn key_ctrl(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    fn key_shift(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT)
     }
 
     // ========== Normal Mode Tests ==========
@@ -459,5 +463,45 @@ mod tests {
 
         assert!(matches!(result, InputResult::Continue));
         assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    // ========== Prune Tests ==========
+
+    #[test]
+    fn test_normal_mode_prune_with_d_when_input_empty() {
+        let mut app = create_test_app();
+        app.input.clear();
+
+        let result = handle_key_event(&mut app, key_shift('D'));
+
+        assert!(matches!(result, InputResult::Continue));
+        // Should enter confirm mode for prune (or show message if no merged worktrees)
+        // Since test app has no merged worktrees, it shows a message
+        assert!(app.message.is_some());
+    }
+
+    #[test]
+    fn test_normal_mode_d_input_when_searching() {
+        let mut app = create_test_app();
+        app.input = "feat".to_string();
+
+        let result = handle_key_event(&mut app, key_shift('D'));
+
+        assert!(matches!(result, InputResult::Continue));
+        // Should add 'D' to input instead of triggering prune
+        assert_eq!(app.input, "featD");
+        assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    #[test]
+    fn test_normal_mode_lowercase_d_input() {
+        let mut app = create_test_app();
+        app.input.clear();
+
+        let result = handle_key_event(&mut app, key(KeyCode::Char('d')));
+
+        assert!(matches!(result, InputResult::Continue));
+        // Lowercase 'd' should be added as search input
+        assert_eq!(app.input, "d");
     }
 }
