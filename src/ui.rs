@@ -1,19 +1,12 @@
 use crate::app::{App, AppMode, ConfirmAction};
+use crate::theme::ThemeColors;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Margin, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph},
     Frame,
 };
-
-const HEADER_COLOR: Color = Color::Cyan;
-const SELECTED_COLOR: Color = Color::Yellow;
-const BRANCH_COLOR: Color = Color::Green;
-const REMOTE_COLOR: Color = Color::Magenta;
-const MAIN_WORKTREE_COLOR: Color = Color::Blue;
-const KEY_COLOR: Color = Color::Yellow;
-const DESC_COLOR: Color = Color::DarkGray;
 
 /// Branch icon (NerdFont)
 const BRANCH_ICON: &str = "\u{e725}";
@@ -37,21 +30,22 @@ fn inner_area(frame: &Frame) -> Rect {
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = inner_area(frame);
+    let colors = &app.theme.colors;
     match app.mode {
-        AppMode::Normal => draw_normal_mode(frame, app, area),
-        AppMode::Create => draw_create_mode(frame, app, area),
+        AppMode::Normal => draw_normal_mode(frame, app, area, colors),
+        AppMode::Create => draw_create_mode(frame, app, area, colors),
         AppMode::Confirm => {
-            draw_normal_mode(frame, app, area);
-            draw_confirm_dialog(frame, app);
+            draw_normal_mode(frame, app, area, colors);
+            draw_confirm_dialog(frame, app, colors);
         }
         AppMode::Help => {
-            draw_normal_mode(frame, app, area);
-            draw_help_dialog(frame);
+            draw_normal_mode(frame, app, area, colors);
+            draw_help_dialog(frame, colors);
         }
     }
 }
 
-fn draw_normal_mode(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_normal_mode(frame: &mut Frame, app: &App, area: Rect, colors: &ThemeColors) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -68,22 +62,22 @@ fn draw_normal_mode(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 "gwm",
                 Style::default()
-                    .fg(HEADER_COLOR)
+                    .fg(colors.header)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Search", Style::default().fg(Color::DarkGray)),
+            Span::styled(" │ ", Style::default().fg(colors.separator)),
+            Span::styled("Search", Style::default().fg(colors.text_muted)),
         ]))
     } else {
         Paragraph::new(Line::from(vec![
             Span::styled(
                 "gwm",
                 Style::default()
-                    .fg(HEADER_COLOR)
+                    .fg(colors.header)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
-            Span::styled(&app.input, Style::default().fg(Color::White)),
+            Span::styled(" │ ", Style::default().fg(colors.separator)),
+            Span::styled(&app.input, Style::default().fg(colors.text)),
         ]))
     };
     frame.render_widget(header, chunks[0]);
@@ -113,10 +107,10 @@ fn draw_normal_mode(frame: &mut Frame, app: &App, area: Rect) {
 
             let name_style = if is_selected {
                 Style::default()
-                    .fg(SELECTED_COLOR)
+                    .fg(colors.selected)
                     .add_modifier(Modifier::BOLD)
             } else if wt.is_main {
-                Style::default().fg(MAIN_WORKTREE_COLOR)
+                Style::default().fg(colors.main_worktree)
             } else {
                 Style::default()
             };
@@ -128,7 +122,7 @@ fn draw_normal_mode(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(
                     prefix,
                     if is_selected {
-                        Style::default().fg(SELECTED_COLOR)
+                        Style::default().fg(colors.selected)
                     } else {
                         Style::default()
                     },
@@ -138,11 +132,11 @@ fn draw_normal_mode(frame: &mut Frame, app: &App, area: Rect) {
 
             // Add separator and branch only if branch is different from worktree name
             if let Some(branch) = branch_display {
-                spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+                spans.push(Span::styled(" | ", Style::default().fg(colors.separator)));
                 spans.push(Span::styled(
                     format_branch_with_icon(branch, icons_enabled),
                     Style::default()
-                        .fg(BRANCH_COLOR)
+                        .fg(colors.branch)
                         .add_modifier(Modifier::DIM),
                 ));
             }
@@ -151,7 +145,7 @@ fn draw_normal_mode(frame: &mut Frame, app: &App, area: Rect) {
                 spans.push(Span::styled(
                     " [main]",
                     Style::default()
-                        .fg(MAIN_WORKTREE_COLOR)
+                        .fg(colors.main_worktree)
                         .add_modifier(Modifier::DIM),
                 ));
             }
@@ -180,19 +174,19 @@ fn draw_normal_mode(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(list, main_chunks[0]);
 
     // Detail pane
-    draw_detail_pane(frame, app, main_chunks[1]);
+    draw_detail_pane(frame, app, main_chunks[1], colors);
 
     // Footer
     if let Some(msg) = &app.message {
-        let footer = Paragraph::new(msg.as_str()).style(Style::default().fg(Color::Green));
+        let footer = Paragraph::new(msg.as_str()).style(Style::default().fg(colors.success));
         frame.render_widget(footer, chunks[3]);
     } else {
-        let footer = render_normal_footer();
+        let footer = render_normal_footer(colors);
         frame.render_widget(footer, chunks[3]);
     }
 }
 
-fn draw_detail_pane(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_detail_pane(frame: &mut Frame, app: &App, area: Rect, colors: &ThemeColors) {
     let detail = app.get_selected_worktree_detail();
     let icons_enabled = app.icons_enabled();
 
@@ -204,18 +198,18 @@ fn draw_detail_pane(frame: &mut Frame, app: &App, area: Rect) {
         let icon_span = if icons_enabled {
             Span::styled(
                 format!("{} ", BRANCH_ICON),
-                Style::default().fg(BRANCH_COLOR),
+                Style::default().fg(colors.branch),
             )
         } else {
             Span::raw("")
         };
         lines.push(Line::from(vec![
-            Span::styled("Branch: ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Branch: ", Style::default().fg(colors.text_muted)),
             icon_span,
             Span::styled(
                 branch_name,
                 Style::default()
-                    .fg(BRANCH_COLOR)
+                    .fg(colors.branch)
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
@@ -223,8 +217,8 @@ fn draw_detail_pane(frame: &mut Frame, app: &App, area: Rect) {
         // Path
         let display_path = app.format_path(&detail.path);
         lines.push(Line::from(vec![
-            Span::styled("Path:   ", Style::default().fg(Color::DarkGray)),
-            Span::styled(display_path, Style::default().fg(Color::White)),
+            Span::styled("Path:   ", Style::default().fg(colors.text_muted)),
+            Span::styled(display_path, Style::default().fg(colors.text)),
         ]));
 
         lines.push(Line::from(""));
@@ -233,32 +227,32 @@ fn draw_detail_pane(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(vec![Span::styled(
             "Changed Files",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(colors.text_muted)
                 .add_modifier(Modifier::UNDERLINED),
         )]));
 
         if detail.changed_files.is_empty() {
             lines.push(Line::from(vec![Span::styled(
                 "  (clean)",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(colors.text_muted),
             )]));
         } else {
             let summary = &detail.changed_files;
             lines.push(Line::from(vec![
-                Span::styled("  +", Style::default().fg(Color::Green)),
+                Span::styled("  +", Style::default().fg(colors.success)),
                 Span::styled(
                     format!("{} ", summary.added),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(colors.text),
                 ),
-                Span::styled("-", Style::default().fg(Color::Red)),
+                Span::styled("-", Style::default().fg(colors.error)),
                 Span::styled(
                     format!("{} ", summary.deleted),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(colors.text),
                 ),
-                Span::styled("~", Style::default().fg(Color::Yellow)),
+                Span::styled("~", Style::default().fg(colors.warning)),
                 Span::styled(
                     format!("{}", summary.modified),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(colors.text),
                 ),
             ]));
         }
@@ -269,14 +263,14 @@ fn draw_detail_pane(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(vec![Span::styled(
             "Recent Commits",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(colors.text_muted)
                 .add_modifier(Modifier::UNDERLINED),
         )]));
 
         if detail.recent_commits.is_empty() {
             lines.push(Line::from(vec![Span::styled(
                 "  (no commits)",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(colors.text_muted),
             )]));
         } else {
             for commit in detail.recent_commits {
@@ -284,18 +278,18 @@ fn draw_detail_pane(frame: &mut Frame, app: &App, area: Rect) {
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!("  {} ", graph_char),
-                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(colors.header),
                     ),
-                    Span::styled(commit.short_id, Style::default().fg(Color::Yellow)),
+                    Span::styled(commit.short_id, Style::default().fg(colors.warning)),
                     Span::styled(" ", Style::default()),
-                    Span::styled(commit.message, Style::default().fg(Color::White)),
+                    Span::styled(commit.message, Style::default().fg(colors.text)),
                 ]));
             }
         }
     } else {
         lines.push(Line::from(vec![Span::styled(
             "No worktree selected",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(colors.text_muted),
         )]));
     }
 
@@ -308,7 +302,7 @@ fn draw_detail_pane(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(detail_widget, area);
 }
 
-fn draw_create_mode(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_create_mode(frame: &mut Frame, app: &App, area: Rect, colors: &ThemeColors) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -325,10 +319,10 @@ fn draw_create_mode(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             "gwm",
             Style::default()
-                .fg(HEADER_COLOR)
+                .fg(colors.header)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" - Create Worktree", Style::default().fg(Color::DarkGray)),
+        Span::styled(" - Create Worktree", Style::default().fg(colors.text_muted)),
     ]));
     frame.render_widget(header, chunks[0]);
 
@@ -361,16 +355,16 @@ fn draw_create_mode(frame: &mut Frame, app: &App, area: Rect) {
     let create_new_prefix = if is_create_new_selected { "▶ " } else { "  " };
     let create_new_style = if is_create_new_selected {
         Style::default()
-            .fg(SELECTED_COLOR)
+            .fg(colors.selected)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(colors.header)
     };
     items.push(ListItem::new(Line::from(vec![
         Span::styled(
             create_new_prefix,
             if is_create_new_selected {
-                Style::default().fg(SELECTED_COLOR)
+                Style::default().fg(colors.selected)
             } else {
                 Style::default()
             },
@@ -385,12 +379,12 @@ fn draw_create_mode(frame: &mut Frame, app: &App, area: Rect) {
 
         let name_style = if is_selected {
             Style::default()
-                .fg(SELECTED_COLOR)
+                .fg(colors.selected)
                 .add_modifier(Modifier::BOLD)
         } else if branch.is_remote {
-            Style::default().fg(REMOTE_COLOR)
+            Style::default().fg(colors.remote)
         } else {
-            Style::default().fg(BRANCH_COLOR)
+            Style::default().fg(colors.branch)
         };
 
         let icon_prefix = if icons_enabled {
@@ -403,7 +397,7 @@ fn draw_create_mode(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 prefix,
                 if is_selected {
-                    Style::default().fg(SELECTED_COLOR)
+                    Style::default().fg(colors.selected)
                 } else {
                     Style::default()
                 },
@@ -411,7 +405,7 @@ fn draw_create_mode(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(icon_prefix, name_style),
             Span::styled(&branch.name, name_style),
             if branch.is_head {
-                Span::styled(" *", Style::default().fg(Color::Yellow))
+                Span::styled(" *", Style::default().fg(colors.warning))
             } else {
                 Span::raw("")
             },
@@ -419,7 +413,7 @@ fn draw_create_mode(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(
                     " [remote]",
                     Style::default()
-                        .fg(REMOTE_COLOR)
+                        .fg(colors.remote)
                         .add_modifier(Modifier::DIM),
                 )
             } else {
@@ -440,45 +434,45 @@ fn draw_create_mode(frame: &mut Frame, app: &App, area: Rect) {
 
     // Footer
     if let Some(msg) = &app.message {
-        let footer = Paragraph::new(msg.as_str()).style(Style::default().fg(Color::Green));
+        let footer = Paragraph::new(msg.as_str()).style(Style::default().fg(colors.success));
         frame.render_widget(footer, chunks[4]);
     } else {
-        let footer = render_create_footer();
+        let footer = render_create_footer(colors);
         frame.render_widget(footer, chunks[4]);
     }
 }
 
-fn render_normal_footer<'a>() -> Paragraph<'a> {
+fn render_normal_footer(colors: &ThemeColors) -> Paragraph<'static> {
     Paragraph::new(Line::from(vec![
-        Span::styled("↑↓", Style::default().fg(KEY_COLOR)),
-        Span::styled(": move  ", Style::default().fg(DESC_COLOR)),
-        Span::styled("Enter", Style::default().fg(KEY_COLOR)),
-        Span::styled(": open  ", Style::default().fg(DESC_COLOR)),
-        Span::styled("C-o", Style::default().fg(KEY_COLOR)),
-        Span::styled(": create  ", Style::default().fg(DESC_COLOR)),
-        Span::styled("C-d", Style::default().fg(KEY_COLOR)),
-        Span::styled(": delete  ", Style::default().fg(DESC_COLOR)),
-        Span::styled("?", Style::default().fg(KEY_COLOR)),
-        Span::styled(": help  ", Style::default().fg(DESC_COLOR)),
-        Span::styled("C-q", Style::default().fg(KEY_COLOR)),
-        Span::styled(": quit", Style::default().fg(DESC_COLOR)),
+        Span::styled("↑↓", Style::default().fg(colors.key)),
+        Span::styled(": move  ", Style::default().fg(colors.description)),
+        Span::styled("Enter", Style::default().fg(colors.key)),
+        Span::styled(": open  ", Style::default().fg(colors.description)),
+        Span::styled("C-o", Style::default().fg(colors.key)),
+        Span::styled(": create  ", Style::default().fg(colors.description)),
+        Span::styled("C-d", Style::default().fg(colors.key)),
+        Span::styled(": delete  ", Style::default().fg(colors.description)),
+        Span::styled("?", Style::default().fg(colors.key)),
+        Span::styled(": help  ", Style::default().fg(colors.description)),
+        Span::styled("C-q", Style::default().fg(colors.key)),
+        Span::styled(": quit", Style::default().fg(colors.description)),
     ]))
 }
 
-fn render_create_footer<'a>() -> Paragraph<'a> {
+fn render_create_footer(colors: &ThemeColors) -> Paragraph<'static> {
     Paragraph::new(Line::from(vec![
-        Span::styled("↑↓", Style::default().fg(KEY_COLOR)),
-        Span::styled(": move  ", Style::default().fg(DESC_COLOR)),
-        Span::styled("Enter", Style::default().fg(KEY_COLOR)),
-        Span::styled(": create  ", Style::default().fg(DESC_COLOR)),
-        Span::styled("Esc", Style::default().fg(KEY_COLOR)),
-        Span::styled("/", Style::default().fg(DESC_COLOR)),
-        Span::styled("C-c", Style::default().fg(KEY_COLOR)),
-        Span::styled(": cancel", Style::default().fg(DESC_COLOR)),
+        Span::styled("↑↓", Style::default().fg(colors.key)),
+        Span::styled(": move  ", Style::default().fg(colors.description)),
+        Span::styled("Enter", Style::default().fg(colors.key)),
+        Span::styled(": create  ", Style::default().fg(colors.description)),
+        Span::styled("Esc", Style::default().fg(colors.key)),
+        Span::styled("/", Style::default().fg(colors.description)),
+        Span::styled("C-c", Style::default().fg(colors.key)),
+        Span::styled(": cancel", Style::default().fg(colors.description)),
     ]))
 }
 
-fn draw_confirm_dialog(frame: &mut Frame, app: &App) {
+fn draw_confirm_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
     let area = centered_rect(60, 30, frame.area());
 
     let message = match app.confirm_action {
@@ -509,7 +503,7 @@ fn draw_confirm_dialog(frame: &mut Frame, app: &App) {
         Block::default()
             .borders(Borders::ALL)
             .title("Confirm")
-            .style(Style::default().fg(Color::Yellow))
+            .style(Style::default().fg(colors.warning))
             .padding(Padding::horizontal(1)),
     )
     .style(Style::default());
@@ -518,14 +512,14 @@ fn draw_confirm_dialog(frame: &mut Frame, app: &App) {
     frame.render_widget(dialog, area);
 }
 
-fn draw_help_dialog(frame: &mut Frame) {
+fn draw_help_dialog(frame: &mut Frame, colors: &ThemeColors) {
     let area = centered_rect(70, 80, frame.area());
 
     let help_text = vec![
         Line::from(vec![Span::styled(
             "Keybindings",
             Style::default()
-                .fg(HEADER_COLOR)
+                .fg(colors.header)
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
@@ -534,12 +528,12 @@ fn draw_help_dialog(frame: &mut Frame) {
             Style::default().add_modifier(Modifier::UNDERLINED),
         )]),
         Line::from(vec![
-            Span::styled("  ↑ / C-p", Style::default().fg(KEY_COLOR)),
-            Span::styled("     Move up", Style::default().fg(DESC_COLOR)),
+            Span::styled("  ↑ / C-p", Style::default().fg(colors.key)),
+            Span::styled("     Move up", Style::default().fg(colors.description)),
         ]),
         Line::from(vec![
-            Span::styled("  ↓ / C-n", Style::default().fg(KEY_COLOR)),
-            Span::styled("     Move down", Style::default().fg(DESC_COLOR)),
+            Span::styled("  ↓ / C-n", Style::default().fg(colors.key)),
+            Span::styled("     Move down", Style::default().fg(colors.description)),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -547,28 +541,31 @@ fn draw_help_dialog(frame: &mut Frame) {
             Style::default().add_modifier(Modifier::UNDERLINED),
         )]),
         Line::from(vec![
-            Span::styled("  Enter", Style::default().fg(KEY_COLOR)),
+            Span::styled("  Enter", Style::default().fg(colors.key)),
             Span::styled(
                 "       Open worktree / Create",
-                Style::default().fg(DESC_COLOR),
+                Style::default().fg(colors.description),
             ),
         ]),
         Line::from(vec![
-            Span::styled("  C-o", Style::default().fg(KEY_COLOR)),
+            Span::styled("  C-o", Style::default().fg(colors.key)),
             Span::styled(
                 "         Enter create mode",
-                Style::default().fg(DESC_COLOR),
+                Style::default().fg(colors.description),
             ),
         ]),
         Line::from(vec![
-            Span::styled("  C-d", Style::default().fg(KEY_COLOR)),
-            Span::styled("         Delete worktree", Style::default().fg(DESC_COLOR)),
+            Span::styled("  C-d", Style::default().fg(colors.key)),
+            Span::styled(
+                "         Delete worktree",
+                Style::default().fg(colors.description),
+            ),
         ]),
         Line::from(vec![
-            Span::styled("  C-D", Style::default().fg(KEY_COLOR)),
+            Span::styled("  C-D", Style::default().fg(colors.key)),
             Span::styled(
                 "         Prune merged worktrees",
-                Style::default().fg(DESC_COLOR),
+                Style::default().fg(colors.description),
             ),
         ]),
         Line::from(""),
@@ -577,17 +574,20 @@ fn draw_help_dialog(frame: &mut Frame) {
             Style::default().add_modifier(Modifier::UNDERLINED),
         )]),
         Line::from(vec![
-            Span::styled("  ?", Style::default().fg(KEY_COLOR)),
-            Span::styled("           Show this help", Style::default().fg(DESC_COLOR)),
+            Span::styled("  ?", Style::default().fg(colors.key)),
+            Span::styled(
+                "           Show this help",
+                Style::default().fg(colors.description),
+            ),
         ]),
         Line::from(vec![
-            Span::styled("  Esc / C-q", Style::default().fg(KEY_COLOR)),
-            Span::styled("   Quit / Cancel", Style::default().fg(DESC_COLOR)),
+            Span::styled("  Esc / C-q", Style::default().fg(colors.key)),
+            Span::styled("   Quit / Cancel", Style::default().fg(colors.description)),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
             "Press any key to close",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(colors.text_muted),
         )]),
     ];
 
@@ -595,7 +595,7 @@ fn draw_help_dialog(frame: &mut Frame) {
         Block::default()
             .borders(Borders::ALL)
             .title("Help")
-            .style(Style::default().fg(HEADER_COLOR))
+            .style(Style::default().fg(colors.header))
             .padding(Padding::horizontal(1)),
     );
 

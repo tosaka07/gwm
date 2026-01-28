@@ -3,6 +3,7 @@ mod config;
 mod git;
 mod hooks;
 mod input;
+mod theme;
 mod ui;
 
 use app::App;
