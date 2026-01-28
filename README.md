@@ -21,10 +21,55 @@ A fast and intuitive TUI application for managing git worktrees.
 brew install tosaka07/tap/gwm
 ```
 
+To upgrade:
+
+```bash
+brew upgrade gwm
+```
+
 ### Cargo
 
 ```bash
 cargo install --git https://github.com/tosaka07/gwm
+```
+
+### mise
+
+Using the [Cargo backend](https://mise.jdx.dev/dev-tools/backends/cargo.html):
+
+```bash
+mise use -g cargo:gwm
+```
+
+### Nix
+
+Using flakes:
+
+```bash
+# Run without installing
+nix run github:tosaka07/gwm
+
+# Install to profile
+nix profile install github:tosaka07/gwm
+```
+
+Or add to your `flake.nix` inputs:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    gwm = {
+      url = "github:tosaka07/gwm";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { nixpkgs, gwm, ... }: {
+    # Example: add to home-manager packages
+    # gwm.packages.${system}.default
+  };
+}
 ```
 
 ## Usage
