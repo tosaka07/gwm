@@ -9,7 +9,7 @@ license = "MIT"
 clap = { version = "4", features = ["derive"] }
 ratatui = "0.30"
 crossterm = "0.28"
-git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
 tokio = { version = "1", features = ["rt-multi-thread", "process", "sync", "time", "macros"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
