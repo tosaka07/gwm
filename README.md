@@ -12,6 +12,7 @@ A fast and intuitive TUI application for managing git worktrees.
 - Prune merged worktrees
 - Fuzzy search/filter worktrees
 - NerdFont icons support
+- Customizable color themes (256-color/True Color support)
 
 ## Installation
 
@@ -151,6 +152,7 @@ gwm loads configuration from three sources (higher priority wins):
 | `GWM_WORKTREE_AUTO_MKDIR` | bool | Auto-create base directory |
 | `GWM_UI_ICONS` | bool | Show NerdFont icons |
 | `GWM_UI_TILDE_HOME` | bool | Display `~` instead of home path |
+| `GWM_UI_THEME` | string | Color theme (`default` or `classic`) |
 
 Boolean values: `true`, `1`, `yes` or `false`, `0`, `no`
 
@@ -192,6 +194,17 @@ icons = true
 # Display ~ instead of full home path
 # Default: true
 tilde_home = true
+
+# Color theme: "default" (256-color/True Color) or "classic" (8-bit 16-color)
+# Default: "default"
+theme = "default"
+
+# Custom color overrides (optional)
+# Supports: hex (#RRGGBB, #RGB), named colors (red, green, etc.), 256-color index (0-255)
+# [ui.colors]
+# header = "#06B6D4"
+# selected = "yellow"
+# branch = "34"
 
 # Per-repository settings
 [[repository_settings]]
@@ -257,6 +270,26 @@ setup_commands = [
 |-----------|------|---------|-------------|
 | `icons` | bool | `true` | Show NerdFont icons in output |
 | `tilde_home` | bool | `true` | Display ~ instead of full home path |
+| `theme` | string | `"default"` | Color theme: `default` (256-color) or `classic` (8-bit) |
+
+#### [ui.colors]
+
+Custom color overrides. All fields are optional.
+
+| Parameter | Description |
+|-----------|-------------|
+| `header` | Header text color |
+| `selected` | Selected item color |
+| `branch` | Branch name color |
+| `remote` | Remote branch color |
+| `main_worktree` | Main worktree indicator color |
+| `key` | Keybinding color |
+| `description` | Description text color |
+
+**Color formats:**
+- Hex: `#RRGGBB` or `#RGB` (e.g., `"#06B6D4"`, `"#F00"`)
+- Named: `red`, `green`, `blue`, `cyan`, `magenta`, `yellow`, `white`, `black`, `gray`, `darkgray`
+- 256-color index: `0` to `255` (e.g., `"34"`)
 
 #### [[repository_settings]]
 
