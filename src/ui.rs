@@ -458,6 +458,8 @@ fn render_normal_footer<'a>() -> Paragraph<'a> {
         Span::styled(": create  ", Style::default().fg(DESC_COLOR)),
         Span::styled("C-d", Style::default().fg(KEY_COLOR)),
         Span::styled(": delete  ", Style::default().fg(DESC_COLOR)),
+        Span::styled("D", Style::default().fg(KEY_COLOR)),
+        Span::styled(": prune  ", Style::default().fg(DESC_COLOR)),
         Span::styled("?", Style::default().fg(KEY_COLOR)),
         Span::styled(": help  ", Style::default().fg(DESC_COLOR)),
         Span::styled("C-q", Style::default().fg(KEY_COLOR)),
@@ -565,9 +567,9 @@ fn draw_help_dialog(frame: &mut Frame) {
             Span::styled("         Delete worktree", Style::default().fg(DESC_COLOR)),
         ]),
         Line::from(vec![
-            Span::styled("  C-D", Style::default().fg(KEY_COLOR)),
+            Span::styled("  D", Style::default().fg(KEY_COLOR)),
             Span::styled(
-                "         Prune merged worktrees",
+                "           Prune merged worktrees",
                 Style::default().fg(DESC_COLOR),
             ),
         ]),
