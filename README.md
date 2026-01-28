@@ -2,29 +2,7 @@
 
 A fast and intuitive TUI application for managing git worktrees.
 
-## Screenshot
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                                                             │
-│  ┌─ Worktrees ────────────────────────┐ ┌─ Details ───────────────────────┐ │
-│  │                                    │ │                                 │ │
-│  │  ▶ gwm                    [main]   │ │ Branch:  main                 │ │
-│  │    feature-auth   feature/auth   │ │ Path:   /Users/dev/gwm         │ │
-│  │    bugfix-123                      │ │                                 │ │
-│  │                                    │ │ Changed Files                   │ │
-│  │                                    │ │   (clean)                       │ │
-│  │                                    │ │                                 │ │
-│  │                                    │ │ Recent Commits                  │ │
-│  │                                    │ │   abc1234 Initial commit        │ │
-│  │                                    │ │   def5678 Add feature           │ │
-│  │                                    │ │                                 │ │
-│  └────────────────────────────────────┘ └─────────────────────────────────┘ │
-│                                                                             │
-│  Enter: open  C-o: create  C-d: delete  ?: help  C-q: quit                  │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+<img src="https://raw.githubusercontent.com/tosaka07/gwm/main/docs/preview.gif" width=640>
 
 ## Features
 
