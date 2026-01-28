@@ -136,9 +136,12 @@ impl GitManager {
         let current_dir = std::env::current_dir()?;
         let repo = Repository::discover(&current_dir)?;
 
+        // Use commondir() to get main repo root even when inside a worktree
+        // commondir() returns the path to .git directory (or .git/worktrees/<name> for worktrees)
+        // of the main repository, equivalent to `git rev-parse --git-common-dir`
         let repo_root = repo
-            .workdir()
-            .or_else(|| repo.path().parent())
+            .commondir()
+            .parent()
             .ok_or(GitError::PathError)?
             .to_path_buf();
 
@@ -150,9 +153,10 @@ impl GitManager {
     pub fn from_path(path: &Path) -> Result<Self, GitError> {
         let repo = Repository::discover(path)?;
 
+        // Use commondir() to get main repo root even when inside a worktree
         let repo_root = repo
-            .workdir()
-            .or_else(|| repo.path().parent())
+            .commondir()
+            .parent()
             .ok_or(GitError::PathError)?
             .to_path_buf();
 
@@ -176,19 +180,19 @@ impl GitManager {
     pub fn list_worktrees(&self) -> Result<Vec<Worktree>, GitError> {
         let mut worktrees = Vec::new();
 
-        // Add main worktree
-        if let Some(workdir) = self.repo.workdir() {
-            let branch = self.get_head_branch()?;
-            worktrees.push(Worktree {
-                name: workdir
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "main".to_string()),
-                path: workdir.to_path_buf(),
-                branch,
-                is_main: true,
-            });
-        }
+        // Add main worktree using repo_root (derived from commondir)
+        // This ensures we always get the main repo path even when called from a worktree
+        let branch = self.get_main_worktree_branch()?;
+        worktrees.push(Worktree {
+            name: self
+                .repo_root
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "main".to_string()),
+            path: self.repo_root.clone(),
+            branch,
+            is_main: true,
+        });
 
         // Get linked worktrees
         let worktree_names = self.repo.worktrees()?;
@@ -209,7 +213,7 @@ impl GitManager {
         Ok(worktrees)
     }
 
-    /// Get the current HEAD branch name
+    /// Get the current HEAD branch name for the current worktree
     fn get_head_branch(&self) -> Result<Option<String>, GitError> {
         let head = self.repo.head()?;
         if head.is_branch() {
@@ -217,6 +221,21 @@ impl GitManager {
         } else {
             Ok(None)
         }
+    }
+
+    /// Get the branch name for the main worktree
+    /// This reads from the main repo's HEAD file directly to ensure we get
+    /// the correct branch even when called from within a linked worktree
+    fn get_main_worktree_branch(&self) -> Result<Option<String>, GitError> {
+        let head_file = self.repo_root.join(".git").join("HEAD");
+        if let Ok(content) = std::fs::read_to_string(&head_file) {
+            if let Some(branch) = content.strip_prefix("ref: refs/heads/") {
+                return Ok(Some(branch.trim().to_string()));
+            }
+        }
+        // Fallback to get_head_branch if we can't read the file
+        // (e.g., if we're already in the main repo)
+        self.get_head_branch()
     }
 
     /// Get branch for a worktree path
@@ -1150,5 +1169,136 @@ mod tests {
             }
             _ => panic!("Expected WorktreeExists error"),
         }
+    }
+
+    // ========== Worktree-relative Tests (commondir behavior) ==========
+
+    /// Helper to canonicalize path for comparison (handles macOS /var -> /private/var symlink)
+    fn canonicalize_path(path: &Path) -> PathBuf {
+        path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    }
+
+    #[test]
+    fn test_git_manager_from_worktree_returns_main_repo_root() {
+        let (temp_dir, _git) = setup_test_repo();
+        let main_repo_path = canonicalize_path(temp_dir.path());
+
+        // Create a worktree
+        Command::new("git")
+            .args(["worktree", "add", "-b", "feature-wt", "worktree-dir"])
+            .current_dir(&main_repo_path)
+            .output()
+            .unwrap();
+
+        let worktree_path = main_repo_path.join("worktree-dir");
+
+        // Create GitManager from inside the worktree
+        let git_from_worktree = GitManager::from_path(&worktree_path).unwrap();
+
+        // repo_root should point to main repo, not the worktree
+        assert_eq!(
+            canonicalize_path(&git_from_worktree.repo_root),
+            main_repo_path
+        );
+    }
+
+    #[test]
+    fn test_list_worktrees_from_worktree_returns_main_repo_list() {
+        let (temp_dir, git) = setup_test_repo();
+        let main_repo_path = canonicalize_path(temp_dir.path());
+
+        // Create a worktree
+        Command::new("git")
+            .args(["worktree", "add", "-b", "feature-list", "worktree-list"])
+            .current_dir(&main_repo_path)
+            .output()
+            .unwrap();
+
+        let worktree_path = main_repo_path.join("worktree-list");
+
+        // Get worktrees from main repo
+        let worktrees_from_main = git.list_worktrees().unwrap();
+
+        // Create GitManager from inside the worktree and list worktrees
+        let git_from_worktree = GitManager::from_path(&worktree_path).unwrap();
+        let worktrees_from_worktree = git_from_worktree.list_worktrees().unwrap();
+
+        // Both should return the same worktrees
+        assert_eq!(worktrees_from_main.len(), worktrees_from_worktree.len());
+
+        // Main worktree path should be the main repo, not the worktree
+        let main_wt = worktrees_from_worktree.iter().find(|w| w.is_main).unwrap();
+        assert_eq!(canonicalize_path(&main_wt.path), main_repo_path);
+    }
+
+    #[test]
+    fn test_create_worktree_from_worktree_uses_main_repo_basedir() {
+        let (temp_dir, _git) = setup_test_repo();
+        let main_repo_path = canonicalize_path(temp_dir.path());
+
+        // Create an initial worktree
+        Command::new("git")
+            .args(["worktree", "add", "-b", "initial-wt", "initial-worktree"])
+            .current_dir(&main_repo_path)
+            .output()
+            .unwrap();
+
+        // Create a branch for the new worktree
+        Command::new("git")
+            .args(["branch", "second-feature"])
+            .current_dir(&main_repo_path)
+            .output()
+            .unwrap();
+
+        let worktree_path = main_repo_path.join("initial-worktree");
+
+        // Create GitManager from inside the worktree
+        let git_from_worktree = GitManager::from_path(&worktree_path).unwrap();
+
+        // Create a new worktree from inside the first worktree
+        let result = git_from_worktree.create_worktree("second-wt", "second-feature", ".");
+
+        assert!(result.is_ok());
+        let new_worktree = result.unwrap();
+
+        // The new worktree should be created relative to main repo, not the worktree
+        // Use canonicalize to handle symlinks and normalize paths
+        let expected_path = main_repo_path.join("second-wt");
+        assert_eq!(
+            canonicalize_path(&new_worktree.path),
+            canonicalize_path(&expected_path)
+        );
+        assert!(new_worktree.path.exists());
+    }
+
+    #[test]
+    fn test_main_worktree_branch_from_worktree() {
+        let (temp_dir, _git) = setup_test_repo();
+        let main_repo_path = canonicalize_path(temp_dir.path());
+
+        // Create a worktree with a different branch
+        Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                "-b",
+                "feature-branch",
+                "feature-worktree",
+            ])
+            .current_dir(&main_repo_path)
+            .output()
+            .unwrap();
+
+        let worktree_path = main_repo_path.join("feature-worktree");
+
+        // Create GitManager from inside the worktree
+        let git_from_worktree = GitManager::from_path(&worktree_path).unwrap();
+
+        // List worktrees and check main worktree's branch
+        let worktrees = git_from_worktree.list_worktrees().unwrap();
+        let main_wt = worktrees.iter().find(|w| w.is_main).unwrap();
+
+        // Main worktree should show "main" branch, not "feature-branch"
+        assert_eq!(main_wt.branch, Some("main".to_string()));
     }
 }
