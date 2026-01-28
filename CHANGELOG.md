@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2025-01-28
+
+### Added
+- Recognize main repo root when running from worktree
+
+### Chore
+- Add Nix flake for package distribution
+- Add MIT license file
+- Add preview GIF to README
+
 ## [0.2.0] - 2025-01-27
 
 ### Added
