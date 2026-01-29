@@ -1,4 +1,5 @@
 use crate::git::RepoInfo;
+use crate::theme::ThemeColorsConfig;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -82,6 +83,10 @@ pub struct UiConfig {
     pub icons: Option<bool>,
     /// Display ~ instead of full home path
     pub tilde_home: Option<bool>,
+    /// Theme name: "default" (256-color/True Color) or "classic" (8-bit 16-color)
+    pub theme: Option<String>,
+    /// Custom color overrides
+    pub colors: Option<ThemeColorsConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -141,6 +146,8 @@ impl Config {
             ui: UiConfig {
                 icons: other.ui.icons.or(self.ui.icons),
                 tilde_home: other.ui.tilde_home.or(self.ui.tilde_home),
+                theme: other.ui.theme.or(self.ui.theme),
+                colors: other.ui.colors.or(self.ui.colors),
             },
             repository_settings: merged_repo_settings,
         }
@@ -233,6 +240,16 @@ impl Config {
     /// Check if tilde_home is enabled (default: true)
     pub fn tilde_home(&self) -> bool {
         self.ui.tilde_home.unwrap_or(true)
+    }
+
+    /// Get the theme name (default: "default")
+    pub fn theme_name(&self) -> &str {
+        self.ui.theme.as_deref().unwrap_or("default")
+    }
+
+    /// Get the custom theme colors config
+    pub fn theme_colors(&self) -> Option<&ThemeColorsConfig> {
+        self.ui.colors.as_ref()
     }
 
     /// Get repository settings for a specific repository path
@@ -334,6 +351,8 @@ fn load_env_config() -> Config {
             tilde_home: std::env::var("GWM_UI_TILDE_HOME")
                 .ok()
                 .and_then(|v| parse_bool(&v)),
+            theme: std::env::var("GWM_UI_THEME").ok(),
+            colors: None, // Colors can only be set via config file
         },
         repository_settings: Vec::new(),
     }
@@ -1171,8 +1190,13 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_config_from_custom_path() {
         use std::fs;
+
+        // Save and clear env vars that could affect the test
+        let orig_basedir = std::env::var("GWM_WORKTREE_BASEDIR").ok();
+        std::env::remove_var("GWM_WORKTREE_BASEDIR");
 
         let temp_dir = std::env::temp_dir().join("gwm_test_custom_config");
         let _ = fs::remove_dir_all(&temp_dir);
@@ -1200,6 +1224,12 @@ mod tests {
         assert_eq!(config.ui.icons, Some(false));
         assert_eq!(config.ui.tilde_home, Some(true));
 
+        // Restore env var
+        match orig_basedir {
+            Some(v) => std::env::set_var("GWM_WORKTREE_BASEDIR", v),
+            None => {}
+        }
+
         // Clean up
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -1216,5 +1246,60 @@ mod tests {
         let result = load_config(None);
         // This should succeed (returns default if no config found)
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_theme_name_default() {
+        let config = Config::default();
+        assert_eq!(config.theme_name(), "default");
+    }
+
+    #[test]
+    fn test_theme_name_custom() {
+        let config = Config {
+            ui: UiConfig {
+                theme: Some("classic".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(config.theme_name(), "classic");
+    }
+
+    #[test]
+    fn test_theme_colors_none_by_default() {
+        let config = Config::default();
+        assert!(config.theme_colors().is_none());
+    }
+
+    #[test]
+    fn test_config_merge_theme() {
+        let base = Config {
+            ui: UiConfig {
+                theme: Some("classic".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let override_config = Config {
+            ui: UiConfig {
+                theme: Some("default".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let merged = base.merge(override_config);
+        assert_eq!(merged.ui.theme, Some("default".to_string()));
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_env_config_theme() {
+        std::env::set_var("GWM_UI_THEME", "classic");
+
+        let config = load_env_config();
+        assert_eq!(config.ui.theme, Some("classic".to_string()));
+
+        std::env::remove_var("GWM_UI_THEME");
     }
 }

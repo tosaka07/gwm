@@ -1,6 +1,7 @@
 use crate::config::{Config, RepositorySettings};
 use crate::git::{Branch, GitManager, Worktree, WorktreeDetail};
 use crate::hooks::SetupRunner;
+use crate::theme::Theme;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -41,6 +42,7 @@ pub struct App {
     pub message: Option<String>,
     pub should_quit: bool,
     pub selected_worktree_path: Option<String>,
+    pub theme: Theme,
     config: Config,
     git: GitManager,
 }
@@ -49,6 +51,7 @@ impl App {
     pub fn new(config: Config, git: GitManager) -> Result<Self, AppError> {
         let worktrees = git.list_worktrees()?;
         let branches = git.list_branches()?;
+        let theme = Theme::from_config(Some(config.theme_name()), config.theme_colors());
 
         Ok(Self {
             mode: AppMode::Normal,
@@ -64,6 +67,7 @@ impl App {
             message: None,
             should_quit: false,
             selected_worktree_path: None,
+            theme,
             config,
             git,
         })
@@ -490,6 +494,7 @@ impl App {
         // Use the project root (where Cargo.toml is) as the repo path for testing
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let git = GitManager::from_path(&manifest_dir).unwrap();
+        let theme = Theme::from_config(Some(config.theme_name()), config.theme_colors());
 
         Self {
             mode: AppMode::Normal,
@@ -505,6 +510,7 @@ impl App {
             message: None,
             should_quit: false,
             selected_worktree_path: None,
+            theme,
             config,
             git,
         }
