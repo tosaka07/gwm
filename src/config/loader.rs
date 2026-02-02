@@ -113,6 +113,12 @@ pub struct Config {
     /// Per-repository settings
     #[serde(default)]
     pub repository_settings: Vec<RepositorySettings>,
+    /// Top-level copy_files (applies to all repositories when no specific repository_settings match)
+    #[serde(default)]
+    pub copy_files: Option<Vec<String>>,
+    /// Top-level setup_commands (applies to all repositories when no specific repository_settings match)
+    #[serde(default)]
+    pub setup_commands: Option<Vec<String>>,
 }
 
 impl Config {
@@ -150,6 +156,8 @@ impl Config {
                 colors: other.ui.colors.or(self.ui.colors),
             },
             repository_settings: merged_repo_settings,
+            copy_files: other.copy_files.or(self.copy_files),
+            setup_commands: other.setup_commands.or(self.setup_commands),
         }
     }
 
@@ -258,6 +266,23 @@ impl Config {
             .iter()
             .find(|s| repo_path.ends_with(&s.repository) || s.repository.ends_with(repo_path))
     }
+
+    /// Get effective settings for a repository path, considering top-level defaults
+    /// Priority: repository_settings (if matched) > top-level copy_files/setup_commands
+    pub fn get_effective_settings(&self, repo_path: &str) -> RepositorySettings {
+        // Check if there's a specific repository_settings match
+        if let Some(repo_settings) = self.get_repository_settings(repo_path) {
+            // Use repository_settings as-is (it overrides top-level settings)
+            return repo_settings.clone();
+        }
+
+        // Fall back to top-level settings
+        RepositorySettings {
+            repository: repo_path.to_string(),
+            copy_files: self.copy_files.clone(),
+            setup_commands: self.setup_commands.clone(),
+        }
+    }
 }
 
 /// Get XDG config directory (respects $XDG_CONFIG_HOME, defaults to ~/.config)
@@ -355,6 +380,8 @@ fn load_env_config() -> Config {
             colors: None, // Colors can only be set via config file
         },
         repository_settings: Vec::new(),
+        copy_files: None,     // copy_files can only be set via config file
+        setup_commands: None, // setup_commands can only be set via config file
     }
 }
 
@@ -1301,5 +1328,189 @@ mod tests {
         assert_eq!(config.ui.theme, Some("classic".to_string()));
 
         std::env::remove_var("GWM_UI_THEME");
+    }
+
+    // ========== Top-level copy_files and setup_commands Tests ==========
+
+    #[test]
+    fn test_config_with_top_level_copy_files() {
+        let toml_content = r#"
+            copy_files = [".env", ".claude"]
+            setup_commands = ["npm install"]
+        "#;
+
+        let config: Config = toml::from_str(toml_content).unwrap();
+
+        assert_eq!(
+            config.copy_files,
+            Some(vec![".env".to_string(), ".claude".to_string()])
+        );
+        assert_eq!(config.setup_commands, Some(vec!["npm install".to_string()]));
+    }
+
+    #[test]
+    fn test_config_merge_top_level_settings() {
+        let global = Config {
+            copy_files: Some(vec![".env".to_string()]),
+            setup_commands: Some(vec!["make setup".to_string()]),
+            ..Default::default()
+        };
+
+        let local = Config {
+            copy_files: Some(vec![".env.local".to_string()]),
+            ..Default::default()
+        };
+
+        let merged = global.merge(local);
+
+        // Local copy_files overrides global
+        assert_eq!(merged.copy_files, Some(vec![".env.local".to_string()]));
+        // Global setup_commands is preserved since local doesn't have it
+        assert_eq!(merged.setup_commands, Some(vec!["make setup".to_string()]));
+    }
+
+    #[test]
+    fn test_config_merge_local_empty_array_disables_global() {
+        let global = Config {
+            copy_files: Some(vec![".env".to_string(), ".claude".to_string()]),
+            setup_commands: Some(vec!["npm install".to_string()]),
+            ..Default::default()
+        };
+
+        // Local explicitly sets empty array to disable global
+        let local = Config {
+            copy_files: Some(vec![]),
+            ..Default::default()
+        };
+
+        let merged = global.merge(local);
+
+        // Local empty array overrides global (disables copy_files)
+        assert_eq!(merged.copy_files, Some(vec![]));
+        // Global setup_commands is preserved since local doesn't specify it
+        assert_eq!(merged.setup_commands, Some(vec!["npm install".to_string()]));
+    }
+
+    #[test]
+    fn test_get_effective_settings_with_empty_copy_files() {
+        let config = Config {
+            copy_files: Some(vec![]),
+            setup_commands: Some(vec!["npm install".to_string()]),
+            ..Default::default()
+        };
+
+        let settings = config.get_effective_settings("/home/user/my-project");
+
+        // Empty array is valid (explicitly disabled)
+        assert_eq!(settings.copy_files, Some(vec![]));
+        assert_eq!(
+            settings.setup_commands,
+            Some(vec!["npm install".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_get_effective_settings_with_no_match_uses_top_level() {
+        let config = Config {
+            copy_files: Some(vec![".env".to_string(), ".claude".to_string()]),
+            setup_commands: Some(vec!["npm install".to_string()]),
+            repository_settings: vec![RepositorySettings {
+                repository: "other-project".to_string(),
+                copy_files: Some(vec!["other.txt".to_string()]),
+                setup_commands: None,
+            }],
+            ..Default::default()
+        };
+
+        // repo_path doesn't match any repository_settings, should fall back to top-level
+        let settings = config.get_effective_settings("/home/user/my-project");
+
+        assert_eq!(
+            settings.copy_files,
+            Some(vec![".env".to_string(), ".claude".to_string()])
+        );
+        assert_eq!(
+            settings.setup_commands,
+            Some(vec!["npm install".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_get_effective_settings_with_match_uses_repository_settings() {
+        let config = Config {
+            copy_files: Some(vec![".env".to_string()]),
+            setup_commands: Some(vec!["npm install".to_string()]),
+            repository_settings: vec![RepositorySettings {
+                repository: "my-project".to_string(),
+                copy_files: Some(vec![".env.local".to_string()]),
+                setup_commands: Some(vec!["yarn install".to_string()]),
+            }],
+            ..Default::default()
+        };
+
+        // repo_path matches repository_settings
+        let settings = config.get_effective_settings("/home/user/my-project");
+
+        // Should use repository_settings, not top-level
+        assert_eq!(settings.copy_files, Some(vec![".env.local".to_string()]));
+        assert_eq!(
+            settings.setup_commands,
+            Some(vec!["yarn install".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_get_effective_settings_empty_top_level() {
+        let config = Config::default();
+
+        let settings = config.get_effective_settings("/home/user/my-project");
+
+        assert!(settings.copy_files.is_none());
+        assert!(settings.setup_commands.is_none());
+    }
+
+    #[test]
+    fn test_mixed_top_level_and_repository_settings() {
+        let toml_content = r#"
+            copy_files = [".env", ".claude"]
+
+            [worktree]
+            basedir = "~/worktrees"
+
+            [[repository_settings]]
+            repository = "special-project"
+            copy_files = [".env", ".env.local", "secrets.json"]
+            setup_commands = ["make setup"]
+        "#;
+
+        let config: Config = toml::from_str(toml_content).unwrap();
+
+        // Top-level settings
+        assert_eq!(
+            config.copy_files,
+            Some(vec![".env".to_string(), ".claude".to_string()])
+        );
+
+        // For non-matching repo, use top-level
+        let settings1 = config.get_effective_settings("/home/user/normal-project");
+        assert_eq!(
+            settings1.copy_files,
+            Some(vec![".env".to_string(), ".claude".to_string()])
+        );
+
+        // For matching repo, use repository_settings
+        let settings2 = config.get_effective_settings("/home/user/special-project");
+        assert_eq!(
+            settings2.copy_files,
+            Some(vec![
+                ".env".to_string(),
+                ".env.local".to_string(),
+                "secrets.json".to_string()
+            ])
+        );
+        assert_eq!(
+            settings2.setup_commands,
+            Some(vec!["make setup".to_string()])
+        );
     }
 }

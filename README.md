@@ -206,15 +206,18 @@ theme = "default"
 # selected = "yellow"
 # branch = "34"
 
-# Per-repository settings
-[[repository_settings]]
-repository = "~/src/my-project"
-
+# Global copy/setup settings (applies to all repositories)
 # Files to copy from main worktree after creating
-copy_files = [".env", ".env.local"]
+copy_files = [".env", ".claude"]
 
 # Commands to run after creating a worktree
 # Available variables: $WORKTREE_NAME, $WORKTREE_PATH, $WORKTREE_BRANCH
+setup_commands = ["npm install"]
+
+# Per-repository settings (overrides global settings when matched)
+[[repository_settings]]
+repository = "~/src/my-project"
+copy_files = [".env", ".env.local", "secrets.json"]
 setup_commands = [
     "npm install",
     "cp ../.env .env"
@@ -291,13 +294,27 @@ Custom color overrides. All fields are optional.
 - Named: `red`, `green`, `blue`, `cyan`, `magenta`, `yellow`, `white`, `black`, `gray`, `darkgray`
 - 256-color index: `0` to `255` (e.g., `"34"`)
 
+#### Global copy_files / setup_commands
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `copy_files` | string[] | - | Files to copy from main worktree (applies to all repositories) |
+| `setup_commands` | string[] | - | Commands to run after creating (applies to all repositories) |
+
+**Priority (high to low):**
+1. Local `.gwm.toml` top-level settings
+2. `[[repository_settings]]` (if repository path matches)
+3. Global config (`~/.config/gwm/config.toml`) top-level settings
+
+Local settings completely replace global settings (not merged).
+
 #### [[repository_settings]]
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `repository` | string | - | Repository path (used as key for matching) |
-| `copy_files` | string[] | - | Files to copy from main worktree to new worktree |
-| `setup_commands` | string[] | - | Commands to run after creating a worktree |
+| `copy_files` | string[] | - | Files to copy (overrides top-level setting) |
+| `setup_commands` | string[] | - | Commands to run (overrides top-level setting) |
 
 ### Setup Command Variables
 
