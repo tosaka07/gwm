@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-02-02
+
+### Added
+- Add glob pattern and directory copy support for copy_files hook
+- Add top-level copy_files and setup_commands configuration support
+- Add color theme system with 256-color support
+
+### Changed
+- Change prune keybind to D and add footer display
+
+### Chore
+- Add color theme configuration to README
+- Add mise and nix installation instructions
+
 ## [0.3.0] - 2025-01-28
 
 ### Added
