@@ -73,10 +73,18 @@ impl App {
         })
     }
 
-    /// Get repository settings for the current repository
+    /// Get effective repository settings for the current repository
+    /// Returns settings from repository_settings if matched, otherwise falls back to top-level settings
     fn get_repository_settings(&self) -> Option<RepositorySettings> {
         let repo_path = self.git.repo_root().to_string_lossy().to_string();
-        self.config.get_repository_settings(&repo_path).cloned()
+        let settings = self.config.get_effective_settings(&repo_path);
+
+        // Return None if no copy_files and no setup_commands
+        if settings.copy_files.is_none() && settings.setup_commands.is_none() {
+            None
+        } else {
+            Some(settings)
+        }
     }
 
     /// Get the main worktree path
