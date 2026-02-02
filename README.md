@@ -316,6 +316,31 @@ Local settings completely replace global settings (not merged).
 | `copy_files` | string[] | - | Files to copy (overrides top-level setting) |
 | `setup_commands` | string[] | - | Commands to run (overrides top-level setting) |
 
+### copy_files Patterns
+
+`copy_files` supports single files, directories, and glob patterns:
+
+```toml
+copy_files = [
+    ".env",                # Single file
+    ".env.local",          # Single file
+    ".claude",             # Directory (copied recursively)
+    "config/database.yml", # Nested file
+    ".env*",               # Glob pattern (matches .env, .env.local, .env.test, etc.)
+    "secrets/*.json",      # Glob in subdirectory
+]
+```
+
+| Pattern | Description |
+|---------|-------------|
+| `.env` | Copy single file |
+| `.claude` | Copy directory recursively |
+| `.env*` | Glob: all files starting with `.env` |
+| `config/*.yml` | Glob: all `.yml` files in `config/` |
+| `**/*.json` | Glob: all `.json` files recursively |
+
+Files that don't exist in the main worktree are silently skipped.
+
 ### Setup Command Variables
 
 | Variable | Description |

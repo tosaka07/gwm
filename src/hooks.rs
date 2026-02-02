@@ -1,5 +1,6 @@
 use crate::config::RepositorySettings;
 use crate::git::Worktree;
+use glob::glob;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use thiserror::Error;
@@ -69,35 +70,105 @@ impl SetupRunner {
         Ok(())
     }
 
-    /// Copy a single file or pattern from source to destination
+    /// Copy a single file, directory, or glob pattern from source to destination
     fn copy_file_or_pattern(
         &self,
         source_base: &Path,
         pattern: &str,
         dest_base: &Path,
     ) -> Result<(), HookError> {
-        let source_path = source_base.join(pattern);
-        let dest_path = dest_base.join(pattern);
+        // Check if pattern contains glob characters
+        if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+            return self.copy_glob_pattern(source_base, pattern, dest_base);
+        }
 
-        if source_path.exists() {
-            // Create parent directories if needed
-            if let Some(parent) = dest_path.parent() {
-                if !parent.exists() {
-                    std::fs::create_dir_all(parent)?;
+        let source_path = source_base.join(pattern);
+
+        if !source_path.exists() {
+            // Silently skip if source doesn't exist (file is optional)
+            return Ok(());
+        }
+
+        if source_path.is_dir() {
+            // Copy directory recursively
+            self.copy_directory(&source_path, &dest_base.join(pattern))?;
+        } else {
+            // Copy single file
+            self.copy_single_file(&source_path, &dest_base.join(pattern))?;
+        }
+
+        Ok(())
+    }
+
+    /// Copy files matching a glob pattern
+    fn copy_glob_pattern(
+        &self,
+        source_base: &Path,
+        pattern: &str,
+        dest_base: &Path,
+    ) -> Result<(), HookError> {
+        let full_pattern = source_base.join(pattern);
+        let pattern_str = full_pattern.to_string_lossy();
+
+        let entries = glob(&pattern_str).map_err(|e| {
+            HookError::CopyFailed(format!("Invalid glob pattern '{}': {}", pattern, e))
+        })?;
+
+        for entry in entries.flatten() {
+            // Calculate relative path from source_base
+            if let Ok(relative) = entry.strip_prefix(source_base) {
+                let dest_path = dest_base.join(relative);
+
+                if entry.is_dir() {
+                    self.copy_directory(&entry, &dest_path)?;
+                } else {
+                    self.copy_single_file(&entry, &dest_path)?;
                 }
             }
-
-            // Copy the file
-            std::fs::copy(&source_path, &dest_path).map_err(|e| {
-                HookError::CopyFailed(format!(
-                    "Failed to copy '{}' to '{}': {}",
-                    source_path.display(),
-                    dest_path.display(),
-                    e
-                ))
-            })?;
         }
-        // Silently skip if source doesn't exist (file is optional)
+
+        Ok(())
+    }
+
+    /// Copy a single file
+    fn copy_single_file(&self, source: &Path, dest: &Path) -> Result<(), HookError> {
+        // Create parent directories if needed
+        if let Some(parent) = dest.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+
+        std::fs::copy(source, dest).map_err(|e| {
+            HookError::CopyFailed(format!(
+                "Failed to copy '{}' to '{}': {}",
+                source.display(),
+                dest.display(),
+                e
+            ))
+        })?;
+
+        Ok(())
+    }
+
+    /// Copy a directory recursively
+    fn copy_directory(&self, source: &Path, dest: &Path) -> Result<(), HookError> {
+        if !dest.exists() {
+            std::fs::create_dir_all(dest)?;
+        }
+
+        for entry in std::fs::read_dir(source)? {
+            let entry = entry?;
+            let entry_path = entry.path();
+            let file_name = entry.file_name();
+            let dest_path = dest.join(&file_name);
+
+            if entry_path.is_dir() {
+                self.copy_directory(&entry_path, &dest_path)?;
+            } else {
+                self.copy_single_file(&entry_path, &dest_path)?;
+            }
+        }
 
         Ok(())
     }
@@ -424,6 +495,373 @@ mod tests {
         );
 
         // Clean up
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    // ========== Glob Pattern Tests ==========
+
+    #[test]
+    fn test_copy_glob_pattern() {
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join("gwm_test_copy_glob");
+        let main_dir = temp_dir.join("main");
+        let worktree_dir = temp_dir.join("worktree");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&main_dir).unwrap();
+        fs::create_dir_all(&worktree_dir).unwrap();
+
+        // Create multiple .env files
+        fs::write(main_dir.join(".env"), "BASE=value").unwrap();
+        fs::write(main_dir.join(".env.local"), "LOCAL=value").unwrap();
+        fs::write(main_dir.join(".env.test"), "TEST=value").unwrap();
+        fs::write(main_dir.join("other.txt"), "OTHER=value").unwrap();
+
+        let runner = SetupRunner::new(Some(RepositorySettings {
+            repository: "test".to_string(),
+            copy_files: Some(vec![".env*".to_string()]),
+            setup_commands: None,
+        }))
+        .with_main_worktree(main_dir.clone());
+
+        let worktree = Worktree {
+            name: "test-worktree".to_string(),
+            path: worktree_dir.clone(),
+            branch: Some("test".to_string()),
+            is_main: false,
+        };
+
+        let result = runner.run_setup(&worktree);
+        assert!(result.is_ok());
+
+        // Verify glob matched files were copied
+        assert!(worktree_dir.join(".env").exists());
+        assert!(worktree_dir.join(".env.local").exists());
+        assert!(worktree_dir.join(".env.test").exists());
+        // other.txt should NOT be copied
+        assert!(!worktree_dir.join("other.txt").exists());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    // ========== Directory Copy Tests ==========
+
+    #[test]
+    fn test_copy_directory() {
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join("gwm_test_copy_dir");
+        let main_dir = temp_dir.join("main");
+        let worktree_dir = temp_dir.join("worktree");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&main_dir.join(".claude")).unwrap();
+        fs::create_dir_all(&worktree_dir).unwrap();
+
+        // Create files in .claude directory
+        fs::write(
+            main_dir.join(".claude").join("settings.json"),
+            r#"{"key": "value"}"#,
+        )
+        .unwrap();
+        fs::write(
+            main_dir.join(".claude").join("config.toml"),
+            "key = \"value\"",
+        )
+        .unwrap();
+
+        let runner = SetupRunner::new(Some(RepositorySettings {
+            repository: "test".to_string(),
+            copy_files: Some(vec![".claude".to_string()]),
+            setup_commands: None,
+        }))
+        .with_main_worktree(main_dir.clone());
+
+        let worktree = Worktree {
+            name: "test-worktree".to_string(),
+            path: worktree_dir.clone(),
+            branch: Some("test".to_string()),
+            is_main: false,
+        };
+
+        let result = runner.run_setup(&worktree);
+        assert!(result.is_ok());
+
+        // Verify directory and contents were copied
+        assert!(worktree_dir.join(".claude").is_dir());
+        assert!(worktree_dir.join(".claude").join("settings.json").exists());
+        assert!(worktree_dir.join(".claude").join("config.toml").exists());
+        assert_eq!(
+            fs::read_to_string(worktree_dir.join(".claude").join("settings.json")).unwrap(),
+            r#"{"key": "value"}"#
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_copy_nested_directory() {
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join("gwm_test_copy_nested_dir");
+        let main_dir = temp_dir.join("main");
+        let worktree_dir = temp_dir.join("worktree");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&main_dir.join(".claude").join("prompts")).unwrap();
+        fs::create_dir_all(&worktree_dir).unwrap();
+
+        // Create nested structure
+        fs::write(main_dir.join(".claude").join("settings.json"), "{}").unwrap();
+        fs::write(
+            main_dir.join(".claude").join("prompts").join("default.md"),
+            "# Default",
+        )
+        .unwrap();
+
+        let runner = SetupRunner::new(Some(RepositorySettings {
+            repository: "test".to_string(),
+            copy_files: Some(vec![".claude".to_string()]),
+            setup_commands: None,
+        }))
+        .with_main_worktree(main_dir.clone());
+
+        let worktree = Worktree {
+            name: "test-worktree".to_string(),
+            path: worktree_dir.clone(),
+            branch: Some("test".to_string()),
+            is_main: false,
+        };
+
+        let result = runner.run_setup(&worktree);
+        assert!(result.is_ok());
+
+        // Verify nested structure was copied
+        assert!(worktree_dir.join(".claude").join("prompts").is_dir());
+        assert!(worktree_dir
+            .join(".claude")
+            .join("prompts")
+            .join("default.md")
+            .exists());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_copy_glob_no_match() {
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join("gwm_test_glob_no_match");
+        let main_dir = temp_dir.join("main");
+        let worktree_dir = temp_dir.join("worktree");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&main_dir).unwrap();
+        fs::create_dir_all(&worktree_dir).unwrap();
+
+        // Create files that don't match the pattern
+        fs::write(main_dir.join("other.txt"), "content").unwrap();
+
+        let runner = SetupRunner::new(Some(RepositorySettings {
+            repository: "test".to_string(),
+            copy_files: Some(vec!["*.env".to_string()]), // No .env files exist
+            setup_commands: None,
+        }))
+        .with_main_worktree(main_dir.clone());
+
+        let worktree = Worktree {
+            name: "test-worktree".to_string(),
+            path: worktree_dir.clone(),
+            branch: Some("test".to_string()),
+            is_main: false,
+        };
+
+        // Should succeed even with no matches (silently skip)
+        let result = runner.run_setup(&worktree);
+        assert!(result.is_ok());
+
+        // No files should be copied
+        assert!(fs::read_dir(&worktree_dir).unwrap().next().is_none());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_copy_recursive_glob() {
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join("gwm_test_recursive_glob");
+        let main_dir = temp_dir.join("main");
+        let worktree_dir = temp_dir.join("worktree");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&main_dir.join("config")).unwrap();
+        fs::create_dir_all(&main_dir.join("nested").join("deep")).unwrap();
+        fs::create_dir_all(&worktree_dir).unwrap();
+
+        // Create json files at different levels
+        fs::write(main_dir.join("root.json"), r#"{"level": "root"}"#).unwrap();
+        fs::write(
+            main_dir.join("config").join("app.json"),
+            r#"{"level": "config"}"#,
+        )
+        .unwrap();
+        fs::write(
+            main_dir.join("nested").join("deep").join("settings.json"),
+            r#"{"level": "deep"}"#,
+        )
+        .unwrap();
+        fs::write(main_dir.join("other.txt"), "not json").unwrap();
+
+        let runner = SetupRunner::new(Some(RepositorySettings {
+            repository: "test".to_string(),
+            copy_files: Some(vec!["**/*.json".to_string()]),
+            setup_commands: None,
+        }))
+        .with_main_worktree(main_dir.clone());
+
+        let worktree = Worktree {
+            name: "test-worktree".to_string(),
+            path: worktree_dir.clone(),
+            branch: Some("test".to_string()),
+            is_main: false,
+        };
+
+        let result = runner.run_setup(&worktree);
+        assert!(result.is_ok());
+
+        // Verify all json files were copied
+        assert!(worktree_dir.join("root.json").exists());
+        assert!(worktree_dir.join("config").join("app.json").exists());
+        assert!(worktree_dir
+            .join("nested")
+            .join("deep")
+            .join("settings.json")
+            .exists());
+        // other.txt should NOT be copied
+        assert!(!worktree_dir.join("other.txt").exists());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_copy_empty_directory() {
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join("gwm_test_empty_dir");
+        let main_dir = temp_dir.join("main");
+        let worktree_dir = temp_dir.join("worktree");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&main_dir.join("empty_dir")).unwrap();
+        fs::create_dir_all(&worktree_dir).unwrap();
+
+        let runner = SetupRunner::new(Some(RepositorySettings {
+            repository: "test".to_string(),
+            copy_files: Some(vec!["empty_dir".to_string()]),
+            setup_commands: None,
+        }))
+        .with_main_worktree(main_dir.clone());
+
+        let worktree = Worktree {
+            name: "test-worktree".to_string(),
+            path: worktree_dir.clone(),
+            branch: Some("test".to_string()),
+            is_main: false,
+        };
+
+        let result = runner.run_setup(&worktree);
+        assert!(result.is_ok());
+
+        // Empty directory should be created
+        assert!(worktree_dir.join("empty_dir").is_dir());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_copy_nonexistent_directory() {
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join("gwm_test_nonexistent_dir");
+        let main_dir = temp_dir.join("main");
+        let worktree_dir = temp_dir.join("worktree");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&main_dir).unwrap();
+        fs::create_dir_all(&worktree_dir).unwrap();
+
+        let runner = SetupRunner::new(Some(RepositorySettings {
+            repository: "test".to_string(),
+            copy_files: Some(vec!["nonexistent_dir".to_string()]),
+            setup_commands: None,
+        }))
+        .with_main_worktree(main_dir.clone());
+
+        let worktree = Worktree {
+            name: "test-worktree".to_string(),
+            path: worktree_dir.clone(),
+            branch: Some("test".to_string()),
+            is_main: false,
+        };
+
+        // Should succeed (silently skip nonexistent)
+        let result = runner.run_setup(&worktree);
+        assert!(result.is_ok());
+
+        // Nothing should be created
+        assert!(!worktree_dir.join("nonexistent_dir").exists());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_copy_mixed_patterns() {
+        use std::fs;
+
+        let temp_dir = std::env::temp_dir().join("gwm_test_mixed");
+        let main_dir = temp_dir.join("main");
+        let worktree_dir = temp_dir.join("worktree");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&main_dir.join(".claude")).unwrap();
+        fs::create_dir_all(&worktree_dir).unwrap();
+
+        // Create various files
+        fs::write(main_dir.join(".env"), "ENV=1").unwrap();
+        fs::write(main_dir.join(".env.local"), "LOCAL=1").unwrap();
+        fs::write(main_dir.join(".claude").join("config.json"), "{}").unwrap();
+        fs::write(main_dir.join("README.md"), "# README").unwrap();
+
+        let runner = SetupRunner::new(Some(RepositorySettings {
+            repository: "test".to_string(),
+            copy_files: Some(vec![
+                ".env".to_string(),      // single file
+                ".env*".to_string(),     // glob (overlaps with .env)
+                ".claude".to_string(),   // directory
+                "README.md".to_string(), // single file
+            ]),
+            setup_commands: None,
+        }))
+        .with_main_worktree(main_dir.clone());
+
+        let worktree = Worktree {
+            name: "test-worktree".to_string(),
+            path: worktree_dir.clone(),
+            branch: Some("test".to_string()),
+            is_main: false,
+        };
+
+        let result = runner.run_setup(&worktree);
+        assert!(result.is_ok());
+
+        // All should be copied
+        assert!(worktree_dir.join(".env").exists());
+        assert!(worktree_dir.join(".env.local").exists());
+        assert!(worktree_dir.join(".claude").join("config.json").exists());
+        assert!(worktree_dir.join("README.md").exists());
+
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }
