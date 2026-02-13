@@ -374,6 +374,7 @@ impl GitManager {
     }
 
     /// Delete a worktree
+    #[allow(dead_code)]
     pub fn delete_worktree(&self, name: &str) -> Result<(), GitError> {
         let wt = self.repo.find_worktree(name)?;
         let path = wt.path().to_path_buf();
@@ -394,6 +395,7 @@ impl GitManager {
     }
 
     /// Delete a local branch (force delete, equivalent to `git branch -D`)
+    #[allow(dead_code)]
     pub fn delete_branch(&self, branch_name: &str) -> Result<(), GitError> {
         use std::process::Command;
 

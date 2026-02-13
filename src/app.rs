@@ -2,6 +2,8 @@ use crate::config::{Config, RepositorySettings};
 use crate::git::{Branch, GitManager, Worktree, WorktreeDetail};
 use crate::hooks::SetupRunner;
 use crate::theme::Theme;
+use std::path::Path;
+use std::sync::mpsc;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -19,6 +21,7 @@ pub enum AppMode {
     Normal,
     Create,
     Confirm,
+    Deleting,
     Help,
 }
 
@@ -26,6 +29,22 @@ pub enum AppMode {
 pub enum ConfirmAction {
     DeleteSingle,
     Prune,
+}
+
+/// Result of a background delete operation
+#[derive(Debug)]
+pub enum DeleteResult {
+    SingleCompleted {
+        worktree_name: String,
+        branch_name: Option<String>,
+        branch_deleted: bool,
+        error_message: Option<String>,
+    },
+    PruneCompleted {
+        worktree_count: usize,
+        branch_count: usize,
+    },
+    Error(String),
 }
 
 pub struct App {
@@ -43,8 +62,11 @@ pub struct App {
     pub should_quit: bool,
     pub selected_worktree_path: Option<String>,
     pub theme: Theme,
+    pub deleting_message: Option<String>,
+    pub tick: u64,
     config: Config,
     git: GitManager,
+    delete_receiver: Option<mpsc::Receiver<DeleteResult>>,
 }
 
 impl App {
@@ -68,8 +90,11 @@ impl App {
             should_quit: false,
             selected_worktree_path: None,
             theme,
+            deleting_message: None,
+            tick: 0,
             config,
             git,
+            delete_receiver: None,
         })
     }
 
@@ -235,94 +260,127 @@ impl App {
     }
 
     pub fn confirm_action(&mut self, delete_branch: bool) -> Result<(), AppError> {
+        let repo_root = self.git.repo_root().clone();
+
         match self.confirm_action {
             Some(ConfirmAction::DeleteSingle) => {
-                self.delete_selected_worktree(delete_branch)?;
-            }
-            Some(ConfirmAction::Prune) => {
-                self.prune_merged_worktrees(delete_branch)?;
-            }
-            None => {}
-        }
-        self.enter_normal_mode();
-        Ok(())
-    }
-
-    fn delete_selected_worktree(&mut self, delete_branch: bool) -> Result<(), AppError> {
-        if self.filtered_worktrees.is_empty() {
-            return Ok(());
-        }
-
-        let worktree = self.filtered_worktrees[self.selected_worktree].clone();
-        if worktree.is_main {
-            self.message = Some("Cannot delete main worktree".to_string());
-            return Ok(());
-        }
-
-        // Get branch name before deleting worktree
-        let branch_name = worktree.branch.clone();
-
-        // Delete the worktree
-        self.git.delete_worktree(&worktree.name)?;
-
-        // Delete the branch if requested
-        if delete_branch {
-            if let Some(ref branch) = branch_name {
-                if let Err(e) = self.git.delete_branch(branch) {
-                    self.message = Some(format!(
-                        "Deleted worktree '{}', but failed to delete branch '{}': {}",
-                        worktree.name, branch, e
-                    ));
-                    self.refresh_worktrees()?;
+                if self.filtered_worktrees.is_empty() {
+                    self.enter_normal_mode();
                     return Ok(());
                 }
+                let worktree = self.filtered_worktrees[self.selected_worktree].clone();
+                if worktree.is_main {
+                    self.message = Some("Cannot delete main worktree".to_string());
+                    self.enter_normal_mode();
+                    return Ok(());
+                }
+
+                let branch_name = worktree.branch.clone();
+                self.deleting_message = Some(format!("Deleting worktree '{}'...", worktree.name));
+
+                let (tx, rx) = mpsc::channel();
+                self.delete_receiver = Some(rx);
+                self.mode = AppMode::Deleting;
+                self.tick = 0;
+
+                let wt_name = worktree.name.clone();
+                std::thread::spawn(move || {
+                    let result =
+                        execute_delete_single(&repo_root, &wt_name, branch_name, delete_branch);
+                    let _ = tx.send(result);
+                });
+            }
+            Some(ConfirmAction::Prune) => {
+                let worktrees: Vec<(String, Option<String>)> = self
+                    .merged_worktrees
+                    .iter()
+                    .map(|w| (w.name.clone(), w.branch.clone()))
+                    .collect();
+                let count = worktrees.len();
+                self.deleting_message = Some(format!("Pruning {} worktree(s)...", count));
+
+                let (tx, rx) = mpsc::channel();
+                self.delete_receiver = Some(rx);
+                self.mode = AppMode::Deleting;
+                self.tick = 0;
+
+                std::thread::spawn(move || {
+                    let result = execute_prune(&repo_root, worktrees, delete_branch);
+                    let _ = tx.send(result);
+                });
+            }
+            None => {
+                self.enter_normal_mode();
             }
         }
-
-        if delete_branch {
-            if let Some(ref branch) = branch_name {
-                self.message = Some(format!(
-                    "Deleted worktree '{}' and branch '{}'",
-                    worktree.name, branch
-                ));
-            } else {
-                self.message = Some(format!("Deleted worktree: {}", worktree.name));
-            }
-        } else {
-            self.message = Some(format!("Deleted worktree: {}", worktree.name));
-        }
-        self.refresh_worktrees()?;
-
         Ok(())
     }
 
-    fn prune_merged_worktrees(&mut self, delete_branch: bool) -> Result<(), AppError> {
-        let count = self.merged_worktrees.len();
-        let mut deleted_branches = 0;
+    /// Check if a background delete operation has completed
+    pub fn check_delete_completion(&mut self) -> Result<(), AppError> {
+        let result = match self.delete_receiver {
+            Some(ref receiver) => match receiver.try_recv() {
+                Ok(result) => Some(result),
+                Err(mpsc::TryRecvError::Empty) => return Ok(()),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.delete_receiver = None;
+                    self.deleting_message = None;
+                    self.enter_normal_mode();
+                    self.message = Some("Delete operation failed unexpectedly".to_string());
+                    return Ok(());
+                }
+            },
+            None => return Ok(()),
+        };
 
-        for worktree in &self.merged_worktrees.clone() {
-            let branch_name = worktree.branch.clone();
-            self.git.delete_worktree(&worktree.name)?;
-
-            if delete_branch {
-                if let Some(ref branch) = branch_name {
-                    if self.git.delete_branch(branch).is_ok() {
-                        deleted_branches += 1;
+        if let Some(result) = result {
+            match result {
+                DeleteResult::SingleCompleted {
+                    worktree_name,
+                    branch_name,
+                    branch_deleted,
+                    error_message,
+                } => {
+                    if let Some(err_msg) = error_message {
+                        self.message = Some(err_msg);
+                    } else if branch_deleted {
+                        if let Some(ref branch) = branch_name {
+                            self.message = Some(format!(
+                                "Deleted worktree '{}' and branch '{}'",
+                                worktree_name, branch
+                            ));
+                        } else {
+                            self.message = Some(format!("Deleted worktree: {}", worktree_name));
+                        }
+                    } else {
+                        self.message = Some(format!("Deleted worktree: {}", worktree_name));
                     }
                 }
+                DeleteResult::PruneCompleted {
+                    worktree_count,
+                    branch_count,
+                } => {
+                    if branch_count > 0 {
+                        self.message = Some(format!(
+                            "Pruned {} worktree(s) and {} branch(es)",
+                            worktree_count, branch_count
+                        ));
+                    } else {
+                        self.message =
+                            Some(format!("Pruned {} merged worktree(s)", worktree_count));
+                    }
+                    self.merged_worktrees.clear();
+                }
+                DeleteResult::Error(err) => {
+                    self.message = Some(format!("Error: {}", err));
+                }
             }
-        }
 
-        if delete_branch && deleted_branches > 0 {
-            self.message = Some(format!(
-                "Pruned {} worktree(s) and {} branch(es)",
-                count, deleted_branches
-            ));
-        } else {
-            self.message = Some(format!("Pruned {} merged worktree(s)", count));
+            self.delete_receiver = None;
+            self.deleting_message = None;
+            self.enter_normal_mode();
+            self.refresh_worktrees()?;
         }
-        self.merged_worktrees.clear();
-        self.refresh_worktrees()?;
 
         Ok(())
     }
@@ -534,9 +592,141 @@ impl App {
             should_quit: false,
             selected_worktree_path: None,
             theme,
+            deleting_message: None,
+            tick: 0,
             config,
             git,
+            delete_receiver: None,
         }
+    }
+}
+
+/// Execute single worktree deletion in a background thread
+fn execute_delete_single(
+    repo_root: &Path,
+    worktree_name: &str,
+    branch_name: Option<String>,
+    delete_branch: bool,
+) -> DeleteResult {
+    let repo = match git2::Repository::open(repo_root) {
+        Ok(r) => r,
+        Err(e) => return DeleteResult::Error(format!("Failed to open repository: {}", e)),
+    };
+
+    // Delete the worktree (prune + remove directory)
+    match repo.find_worktree(worktree_name) {
+        Ok(wt) => {
+            let path = wt.path().to_path_buf();
+            if let Err(e) = wt.prune(Some(
+                git2::WorktreePruneOptions::new()
+                    .valid(true)
+                    .working_tree(true),
+            )) {
+                return DeleteResult::Error(format!("Failed to prune worktree: {}", e));
+            }
+            if path.exists() {
+                if let Err(e) = std::fs::remove_dir_all(&path) {
+                    return DeleteResult::Error(format!("Failed to remove directory: {}", e));
+                }
+            }
+        }
+        Err(e) => return DeleteResult::Error(format!("Worktree not found: {}", e)),
+    }
+
+    // Delete the branch if requested
+    let mut branch_deleted = false;
+    let mut error_message = None;
+    if delete_branch {
+        if let Some(ref branch) = branch_name {
+            let output = std::process::Command::new("git")
+                .args(["branch", "-D", branch])
+                .current_dir(repo_root)
+                .output();
+            match output {
+                Ok(o) if o.status.success() => {
+                    branch_deleted = true;
+                }
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    error_message = Some(format!(
+                        "Deleted worktree '{}', but failed to delete branch '{}': {}",
+                        worktree_name,
+                        branch,
+                        stderr.trim()
+                    ));
+                }
+                Err(e) => {
+                    error_message = Some(format!(
+                        "Deleted worktree '{}', but failed to delete branch '{}': {}",
+                        worktree_name, branch, e
+                    ));
+                }
+            }
+        }
+    }
+
+    DeleteResult::SingleCompleted {
+        worktree_name: worktree_name.to_string(),
+        branch_name,
+        branch_deleted,
+        error_message,
+    }
+}
+
+/// Execute prune (multiple worktree deletion) in a background thread
+fn execute_prune(
+    repo_root: &Path,
+    worktrees: Vec<(String, Option<String>)>,
+    delete_branch: bool,
+) -> DeleteResult {
+    let repo = match git2::Repository::open(repo_root) {
+        Ok(r) => r,
+        Err(e) => return DeleteResult::Error(format!("Failed to open repository: {}", e)),
+    };
+
+    let mut deleted_worktrees = 0;
+    let mut deleted_branches = 0;
+
+    for (wt_name, branch_name) in &worktrees {
+        match repo.find_worktree(wt_name) {
+            Ok(wt) => {
+                let path = wt.path().to_path_buf();
+                if wt
+                    .prune(Some(
+                        git2::WorktreePruneOptions::new()
+                            .valid(true)
+                            .working_tree(true),
+                    ))
+                    .is_err()
+                {
+                    continue;
+                }
+                if path.exists() && std::fs::remove_dir_all(&path).is_err() {
+                    continue;
+                }
+            }
+            Err(_) => continue,
+        }
+        deleted_worktrees += 1;
+
+        if delete_branch {
+            if let Some(ref branch) = branch_name {
+                let output = std::process::Command::new("git")
+                    .args(["branch", "-D", branch])
+                    .current_dir(repo_root)
+                    .output();
+                if let Ok(o) = output {
+                    if o.status.success() {
+                        deleted_branches += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    DeleteResult::PruneCompleted {
+        worktree_count: deleted_worktrees,
+        branch_count: deleted_branches,
     }
 }
 
@@ -544,6 +734,58 @@ impl App {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Create a temporary git repository for testing execute_delete_* functions
+    fn setup_git_repo() -> (TempDir, std::path::PathBuf) {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().to_path_buf();
+
+        Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        std::fs::write(repo_path.join("README.md"), "# Test").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+
+        (temp_dir, repo_path)
+    }
+
+    /// Create a worktree with a branch in the test repo
+    fn create_test_worktree_in_repo(repo_path: &std::path::Path, branch: &str, wt_name: &str) {
+        Command::new("git")
+            .args(["branch", branch])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+        let wt_path = repo_path.join(wt_name);
+        Command::new("git")
+            .args(["worktree", "add", wt_path.to_str().unwrap(), branch])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+    }
 
     fn create_test_worktrees() -> Vec<Worktree> {
         vec![
@@ -1122,5 +1364,578 @@ mod tests {
         app.confirm_action = Some(ConfirmAction::Prune);
 
         assert_eq!(app.confirm_action, Some(ConfirmAction::Prune));
+    }
+
+    // ========== Background Delete Tests ==========
+
+    #[test]
+    fn test_confirm_action_transitions_to_deleting_mode() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Confirm;
+        app.confirm_action = Some(ConfirmAction::DeleteSingle);
+        app.selected_worktree = 1; // non-main worktree
+
+        let result = app.confirm_action(false);
+        assert!(result.is_ok());
+        assert_eq!(app.mode, AppMode::Deleting);
+        assert!(app.deleting_message.is_some());
+        assert!(app.delete_receiver.is_some());
+        assert_eq!(app.tick, 0);
+    }
+
+    #[test]
+    fn test_confirm_action_main_worktree_stays_normal() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Confirm;
+        app.confirm_action = Some(ConfirmAction::DeleteSingle);
+        app.selected_worktree = 0; // main worktree
+
+        let result = app.confirm_action(false);
+        assert!(result.is_ok());
+        assert_eq!(app.mode, AppMode::Normal);
+        assert!(app.message.as_ref().unwrap().contains("Cannot delete main"));
+    }
+
+    #[test]
+    fn test_confirm_action_prune_transitions_to_deleting() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Confirm;
+        app.confirm_action = Some(ConfirmAction::Prune);
+        app.merged_worktrees = vec![Worktree {
+            name: "merged-wt".to_string(),
+            path: PathBuf::from("/repo/merged-wt"),
+            branch: Some("merged-branch".to_string()),
+            is_main: false,
+        }];
+
+        let result = app.confirm_action(false);
+        assert!(result.is_ok());
+        assert_eq!(app.mode, AppMode::Deleting);
+        assert!(app.deleting_message.as_ref().unwrap().contains("Pruning"));
+    }
+
+    #[test]
+    fn test_confirm_action_none_enters_normal() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Confirm;
+        app.confirm_action = None;
+
+        let result = app.confirm_action(false);
+        assert!(result.is_ok());
+        assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    #[test]
+    fn test_check_delete_completion_no_receiver() {
+        let mut app = create_test_app();
+        // No receiver set - should be a no-op
+        let result = app.check_delete_completion();
+        assert!(result.is_ok());
+        assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    #[test]
+    fn test_check_delete_completion_pending() {
+        let mut app = create_test_app();
+        let (_tx, rx) = mpsc::channel::<DeleteResult>();
+        app.delete_receiver = Some(rx);
+        app.mode = AppMode::Deleting;
+
+        // Nothing sent yet - should remain in Deleting mode
+        let result = app.check_delete_completion();
+        assert!(result.is_ok());
+        assert_eq!(app.mode, AppMode::Deleting);
+        assert!(app.delete_receiver.is_some());
+    }
+
+    #[test]
+    fn test_check_delete_completion_disconnected() {
+        let mut app = create_test_app();
+        let (tx, rx) = mpsc::channel::<DeleteResult>();
+        app.delete_receiver = Some(rx);
+        app.mode = AppMode::Deleting;
+
+        // Drop sender to simulate thread crash
+        drop(tx);
+
+        let result = app.check_delete_completion();
+        assert!(result.is_ok());
+        assert_eq!(app.mode, AppMode::Normal);
+        assert!(app.delete_receiver.is_none());
+        assert!(app.message.as_ref().unwrap().contains("unexpectedly"));
+    }
+
+    #[test]
+    fn test_check_delete_completion_single_success() {
+        let mut app = create_test_app();
+        let (tx, rx) = mpsc::channel();
+        app.delete_receiver = Some(rx);
+        app.mode = AppMode::Deleting;
+
+        tx.send(DeleteResult::SingleCompleted {
+            worktree_name: "test-wt".to_string(),
+            branch_name: None,
+            branch_deleted: false,
+            error_message: None,
+        })
+        .unwrap();
+
+        let result = app.check_delete_completion();
+        assert!(result.is_ok());
+        assert_eq!(app.mode, AppMode::Normal);
+        assert!(app.delete_receiver.is_none());
+        assert!(app.deleting_message.is_none());
+        assert!(app.message.as_ref().unwrap().contains("test-wt"));
+    }
+
+    #[test]
+    fn test_check_delete_completion_single_with_branch() {
+        let mut app = create_test_app();
+        let (tx, rx) = mpsc::channel();
+        app.delete_receiver = Some(rx);
+        app.mode = AppMode::Deleting;
+
+        tx.send(DeleteResult::SingleCompleted {
+            worktree_name: "test-wt".to_string(),
+            branch_name: Some("feature/test".to_string()),
+            branch_deleted: true,
+            error_message: None,
+        })
+        .unwrap();
+
+        let result = app.check_delete_completion();
+        assert!(result.is_ok());
+        let msg = app.message.as_ref().unwrap();
+        assert!(msg.contains("test-wt"));
+        assert!(msg.contains("feature/test"));
+    }
+
+    #[test]
+    fn test_check_delete_completion_single_branch_error() {
+        let mut app = create_test_app();
+        let (tx, rx) = mpsc::channel();
+        app.delete_receiver = Some(rx);
+        app.mode = AppMode::Deleting;
+
+        tx.send(DeleteResult::SingleCompleted {
+            worktree_name: "test-wt".to_string(),
+            branch_name: Some("feature/test".to_string()),
+            branch_deleted: false,
+            error_message: Some("failed to delete branch".to_string()),
+        })
+        .unwrap();
+
+        let result = app.check_delete_completion();
+        assert!(result.is_ok());
+        assert!(app
+            .message
+            .as_ref()
+            .unwrap()
+            .contains("failed to delete branch"));
+    }
+
+    #[test]
+    fn test_check_delete_completion_prune() {
+        let mut app = create_test_app();
+        let (tx, rx) = mpsc::channel();
+        app.delete_receiver = Some(rx);
+        app.mode = AppMode::Deleting;
+        app.merged_worktrees = vec![Worktree {
+            name: "wt".to_string(),
+            path: PathBuf::from("/repo/wt"),
+            branch: None,
+            is_main: false,
+        }];
+
+        tx.send(DeleteResult::PruneCompleted {
+            worktree_count: 3,
+            branch_count: 2,
+        })
+        .unwrap();
+
+        let result = app.check_delete_completion();
+        assert!(result.is_ok());
+        assert_eq!(app.mode, AppMode::Normal);
+        let msg = app.message.as_ref().unwrap();
+        assert!(msg.contains("3 worktree(s)"));
+        assert!(msg.contains("2 branch(es)"));
+        assert!(app.merged_worktrees.is_empty());
+    }
+
+    #[test]
+    fn test_check_delete_completion_error() {
+        let mut app = create_test_app();
+        let (tx, rx) = mpsc::channel();
+        app.delete_receiver = Some(rx);
+        app.mode = AppMode::Deleting;
+
+        tx.send(DeleteResult::Error("something went wrong".to_string()))
+            .unwrap();
+
+        let result = app.check_delete_completion();
+        assert!(result.is_ok());
+        assert_eq!(app.mode, AppMode::Normal);
+        assert!(app
+            .message
+            .as_ref()
+            .unwrap()
+            .contains("something went wrong"));
+    }
+
+    #[test]
+    fn test_confirm_action_delete_branch_true() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Confirm;
+        app.confirm_action = Some(ConfirmAction::DeleteSingle);
+        app.selected_worktree = 1; // non-main worktree with branch "feature/a"
+
+        let result = app.confirm_action(true);
+        assert!(result.is_ok());
+        assert_eq!(app.mode, AppMode::Deleting);
+        assert!(app.delete_receiver.is_some());
+    }
+
+    #[test]
+    fn test_confirm_action_empty_filtered_worktrees() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Confirm;
+        app.confirm_action = Some(ConfirmAction::DeleteSingle);
+        app.filtered_worktrees.clear();
+
+        let result = app.confirm_action(false);
+        assert!(result.is_ok());
+        assert_eq!(app.mode, AppMode::Normal);
+        assert!(app.delete_receiver.is_none());
+    }
+
+    #[test]
+    fn test_check_delete_completion_clears_input() {
+        let mut app = create_test_app();
+        let (tx, rx) = mpsc::channel();
+        app.delete_receiver = Some(rx);
+        app.mode = AppMode::Deleting;
+        app.input = "leftover search".to_string();
+        app.confirm_action = Some(ConfirmAction::DeleteSingle);
+
+        tx.send(DeleteResult::SingleCompleted {
+            worktree_name: "test-wt".to_string(),
+            branch_name: None,
+            branch_deleted: false,
+            error_message: None,
+        })
+        .unwrap();
+
+        let result = app.check_delete_completion();
+        assert!(result.is_ok());
+        assert!(app.input.is_empty(), "input should be cleared after delete");
+        assert!(
+            app.confirm_action.is_none(),
+            "confirm_action should be cleared after delete"
+        );
+    }
+
+    #[test]
+    fn test_check_delete_completion_prune_without_branches() {
+        let mut app = create_test_app();
+        let (tx, rx) = mpsc::channel();
+        app.delete_receiver = Some(rx);
+        app.mode = AppMode::Deleting;
+        app.merged_worktrees = vec![Worktree {
+            name: "wt".to_string(),
+            path: PathBuf::from("/repo/wt"),
+            branch: None,
+            is_main: false,
+        }];
+
+        tx.send(DeleteResult::PruneCompleted {
+            worktree_count: 2,
+            branch_count: 0,
+        })
+        .unwrap();
+
+        let result = app.check_delete_completion();
+        assert!(result.is_ok());
+        let msg = app.message.as_ref().unwrap();
+        assert!(msg.contains("2 merged worktree(s)"));
+        assert!(
+            !msg.contains("branch"),
+            "should not mention branches when count is 0"
+        );
+    }
+
+    // ========== execute_delete_single Tests ==========
+
+    #[test]
+    fn test_execute_delete_single_success() {
+        let (_temp_dir, repo_path) = setup_git_repo();
+        create_test_worktree_in_repo(&repo_path, "feature-del", "wt-del");
+
+        let result = execute_delete_single(&repo_path, "wt-del", None, false);
+
+        match result {
+            DeleteResult::SingleCompleted {
+                worktree_name,
+                branch_deleted,
+                error_message,
+                ..
+            } => {
+                assert_eq!(worktree_name, "wt-del");
+                assert!(!branch_deleted);
+                assert!(error_message.is_none());
+                // Verify worktree directory is removed
+                assert!(!repo_path.join("wt-del").exists());
+            }
+            other => panic!("Expected SingleCompleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_execute_delete_single_with_branch_deletion() {
+        let (_temp_dir, repo_path) = setup_git_repo();
+        create_test_worktree_in_repo(&repo_path, "feature-br", "wt-br");
+
+        let result =
+            execute_delete_single(&repo_path, "wt-br", Some("feature-br".to_string()), true);
+
+        match result {
+            DeleteResult::SingleCompleted {
+                worktree_name,
+                branch_deleted,
+                error_message,
+                ..
+            } => {
+                assert_eq!(worktree_name, "wt-br");
+                assert!(branch_deleted);
+                assert!(error_message.is_none());
+            }
+            other => panic!("Expected SingleCompleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_execute_delete_single_worktree_not_found() {
+        let (_temp_dir, repo_path) = setup_git_repo();
+
+        let result = execute_delete_single(&repo_path, "nonexistent", None, false);
+
+        match result {
+            DeleteResult::Error(msg) => {
+                assert!(msg.contains("Worktree not found"));
+            }
+            other => panic!("Expected Error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_execute_delete_single_invalid_repo() {
+        let temp_dir = TempDir::new().unwrap();
+        let bad_path = temp_dir.path().to_path_buf();
+
+        let result = execute_delete_single(&bad_path, "wt", None, false);
+
+        match result {
+            DeleteResult::Error(msg) => {
+                assert!(msg.contains("Failed to open repository"));
+            }
+            other => panic!("Expected Error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_execute_delete_single_branch_delete_fails() {
+        let (_temp_dir, repo_path) = setup_git_repo();
+        create_test_worktree_in_repo(&repo_path, "feature-fail", "wt-fail");
+
+        // Try to delete with a non-existent branch name
+        let result = execute_delete_single(
+            &repo_path,
+            "wt-fail",
+            Some("nonexistent-branch".to_string()),
+            true,
+        );
+
+        match result {
+            DeleteResult::SingleCompleted {
+                worktree_name,
+                branch_deleted,
+                error_message,
+                ..
+            } => {
+                assert_eq!(worktree_name, "wt-fail");
+                assert!(!branch_deleted);
+                assert!(error_message.is_some());
+                assert!(error_message.unwrap().contains("failed to delete branch"));
+            }
+            other => panic!("Expected SingleCompleted with error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_execute_delete_single_no_branch_delete_when_false() {
+        let (_temp_dir, repo_path) = setup_git_repo();
+        create_test_worktree_in_repo(&repo_path, "feature-keep", "wt-keep");
+
+        let result = execute_delete_single(
+            &repo_path,
+            "wt-keep",
+            Some("feature-keep".to_string()),
+            false, // do NOT delete branch
+        );
+
+        match result {
+            DeleteResult::SingleCompleted {
+                branch_deleted,
+                error_message,
+                ..
+            } => {
+                assert!(!branch_deleted);
+                assert!(error_message.is_none());
+                // Verify branch still exists
+                let output = Command::new("git")
+                    .args(["branch", "--list", "feature-keep"])
+                    .current_dir(&repo_path)
+                    .output()
+                    .unwrap();
+                let branches = String::from_utf8_lossy(&output.stdout);
+                assert!(
+                    branches.contains("feature-keep"),
+                    "Branch should still exist when delete_branch=false"
+                );
+            }
+            other => panic!("Expected SingleCompleted, got {:?}", other),
+        }
+    }
+
+    // ========== execute_prune Tests ==========
+
+    #[test]
+    fn test_execute_prune_success() {
+        let (_temp_dir, repo_path) = setup_git_repo();
+        create_test_worktree_in_repo(&repo_path, "prune-a", "wt-prune-a");
+        create_test_worktree_in_repo(&repo_path, "prune-b", "wt-prune-b");
+
+        let worktrees = vec![
+            ("wt-prune-a".to_string(), Some("prune-a".to_string())),
+            ("wt-prune-b".to_string(), Some("prune-b".to_string())),
+        ];
+
+        let result = execute_prune(&repo_path, worktrees, false);
+
+        match result {
+            DeleteResult::PruneCompleted {
+                worktree_count,
+                branch_count,
+            } => {
+                assert_eq!(worktree_count, 2);
+                assert_eq!(branch_count, 0);
+            }
+            other => panic!("Expected PruneCompleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_execute_prune_with_branch_deletion() {
+        let (_temp_dir, repo_path) = setup_git_repo();
+        create_test_worktree_in_repo(&repo_path, "prune-br-a", "wt-pbr-a");
+        create_test_worktree_in_repo(&repo_path, "prune-br-b", "wt-pbr-b");
+
+        let worktrees = vec![
+            ("wt-pbr-a".to_string(), Some("prune-br-a".to_string())),
+            ("wt-pbr-b".to_string(), Some("prune-br-b".to_string())),
+        ];
+
+        let result = execute_prune(&repo_path, worktrees, true);
+
+        match result {
+            DeleteResult::PruneCompleted {
+                worktree_count,
+                branch_count,
+            } => {
+                assert_eq!(worktree_count, 2);
+                assert_eq!(branch_count, 2);
+            }
+            other => panic!("Expected PruneCompleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_execute_prune_partial_failure() {
+        let (_temp_dir, repo_path) = setup_git_repo();
+        create_test_worktree_in_repo(&repo_path, "prune-ok", "wt-prune-ok");
+
+        let worktrees = vec![
+            ("wt-prune-ok".to_string(), None),
+            ("nonexistent-wt".to_string(), None), // will fail
+        ];
+
+        let result = execute_prune(&repo_path, worktrees, false);
+
+        match result {
+            DeleteResult::PruneCompleted {
+                worktree_count,
+                branch_count,
+            } => {
+                assert_eq!(worktree_count, 1, "only one worktree should be deleted");
+                assert_eq!(branch_count, 0);
+            }
+            other => panic!("Expected PruneCompleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_execute_prune_all_fail() {
+        let (_temp_dir, repo_path) = setup_git_repo();
+
+        let worktrees = vec![
+            ("no-such-wt-1".to_string(), None),
+            ("no-such-wt-2".to_string(), None),
+        ];
+
+        let result = execute_prune(&repo_path, worktrees, false);
+
+        match result {
+            DeleteResult::PruneCompleted {
+                worktree_count,
+                branch_count,
+            } => {
+                assert_eq!(worktree_count, 0);
+                assert_eq!(branch_count, 0);
+            }
+            other => panic!("Expected PruneCompleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_execute_prune_invalid_repo() {
+        let temp_dir = TempDir::new().unwrap();
+        let bad_path = temp_dir.path().to_path_buf();
+
+        let worktrees = vec![("wt".to_string(), None)];
+        let result = execute_prune(&bad_path, worktrees, false);
+
+        match result {
+            DeleteResult::Error(msg) => {
+                assert!(msg.contains("Failed to open repository"));
+            }
+            other => panic!("Expected Error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_execute_prune_empty_list() {
+        let (_temp_dir, repo_path) = setup_git_repo();
+
+        let result = execute_prune(&repo_path, vec![], false);
+
+        match result {
+            DeleteResult::PruneCompleted {
+                worktree_count,
+                branch_count,
+            } => {
+                assert_eq!(worktree_count, 0);
+                assert_eq!(branch_count, 0);
+            }
+            other => panic!("Expected PruneCompleted, got {:?}", other),
+        }
     }
 }
