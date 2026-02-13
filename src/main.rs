@@ -18,6 +18,7 @@ use ratatui::{backend::CrosstermBackend, Terminal, Viewport};
 use std::io::stdout;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 
 /// Git Worktree Manager - A TUI application for managing git worktrees
 #[derive(Parser)]
@@ -108,14 +109,33 @@ fn run_app(
     loop {
         terminal.draw(|frame| ui::draw(frame, app))?;
 
-        if let Event::Key(key) = event::read()? {
-            // Only handle key press events (not release)
-            if key.kind == KeyEventKind::Press {
-                match handle_key_event(app, key) {
-                    InputResult::Quit => break,
-                    InputResult::Continue => {}
+        // Check for background delete completion
+        if let Err(e) = app.check_delete_completion() {
+            app.message = Some(format!("Error: {}", e));
+        }
+
+        // Use shorter poll timeout during deletion for responsive spinner animation
+        let poll_timeout = if app.mode == app::AppMode::Deleting {
+            Duration::from_millis(80)
+        } else {
+            Duration::from_millis(250)
+        };
+
+        if event::poll(poll_timeout)? {
+            if let Event::Key(key) = event::read()? {
+                // Only handle key press events (not release)
+                if key.kind == KeyEventKind::Press {
+                    match handle_key_event(app, key) {
+                        InputResult::Quit => break,
+                        InputResult::Continue => {}
+                    }
                 }
             }
+        }
+
+        // Increment tick for spinner animation during deletion
+        if app.mode == app::AppMode::Deleting {
+            app.tick = app.tick.wrapping_add(1);
         }
     }
 

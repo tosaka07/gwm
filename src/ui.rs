@@ -11,6 +11,9 @@ use ratatui::{
 /// Branch icon (NerdFont)
 const BRANCH_ICON: &str = "\u{e725}";
 
+/// Spinner animation frames (braille pattern)
+const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
 /// Format branch display with optional icon
 fn format_branch_with_icon(branch: &str, icons_enabled: bool) -> String {
     if icons_enabled {
@@ -37,6 +40,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         AppMode::Confirm => {
             draw_normal_mode(frame, app, area, colors);
             draw_confirm_dialog(frame, app, colors);
+        }
+        AppMode::Deleting => {
+            draw_normal_mode(frame, app, area, colors);
+            draw_deleting_dialog(frame, app, colors);
         }
         AppMode::Help => {
             draw_normal_mode(frame, app, area, colors);
@@ -479,7 +486,7 @@ fn draw_confirm_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
 
     let message = match app.confirm_action {
         Some(ConfirmAction::DeleteSingle) => {
-            let wt = &app.worktrees[app.selected_worktree];
+            let wt = &app.filtered_worktrees[app.selected_worktree];
             format!("Delete worktree '{}'?", wt.name)
         }
         Some(ConfirmAction::Prune) => {
@@ -497,18 +504,65 @@ fn draw_confirm_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
         None => String::new(),
     };
 
-    let dialog = Paragraph::new(format!(
-        "{}\n\n[y] worktree / [Y] worktree & branch / [n] cancel",
-        message
-    ))
-    .block(
+    let shortcut_line = Line::from(vec![
+        Span::styled("y", Style::default().fg(colors.key)),
+        Span::styled(": worktree  ", Style::default().fg(colors.description)),
+        Span::styled("Y", Style::default().fg(colors.key)),
+        Span::styled(
+            ": worktree & branch  ",
+            Style::default().fg(colors.description),
+        ),
+        Span::styled("n", Style::default().fg(colors.key)),
+        Span::styled("/", Style::default().fg(colors.description)),
+        Span::styled("Esc", Style::default().fg(colors.key)),
+        Span::styled(": cancel", Style::default().fg(colors.description)),
+    ]);
+
+    let mut lines: Vec<Line> = message
+        .lines()
+        .map(|l| {
+            Line::from(Span::styled(
+                l.to_string(),
+                Style::default().fg(colors.text),
+            ))
+        })
+        .collect();
+    lines.push(Line::from(""));
+    lines.push(shortcut_line);
+
+    let dialog = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
             .title("Confirm")
             .style(Style::default().fg(colors.warning))
             .padding(Padding::horizontal(1)),
-    )
-    .style(Style::default());
+    );
+
+    frame.render_widget(Clear, area);
+    frame.render_widget(dialog, area);
+}
+
+fn draw_deleting_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
+    let area = centered_rect(50, 20, frame.area());
+
+    let spinner = SPINNER_FRAMES[(app.tick as usize) % SPINNER_FRAMES.len()];
+    let message = format!(
+        "{} {}",
+        spinner,
+        app.deleting_message.as_deref().unwrap_or("Deleting...")
+    );
+
+    let dialog = Paragraph::new(Line::from(vec![Span::styled(
+        message,
+        Style::default().fg(colors.warning),
+    )]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Processing")
+            .style(Style::default().fg(colors.warning))
+            .padding(Padding::horizontal(1)),
+    );
 
     frame.render_widget(Clear, area);
     frame.render_widget(dialog, area);

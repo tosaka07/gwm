@@ -14,6 +14,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> InputResult {
         AppMode::Normal => handle_normal_mode(app, key),
         AppMode::Create => handle_create_mode(app, key),
         AppMode::Confirm => handle_confirm_mode(app, key),
+        AppMode::Deleting => handle_deleting_mode(key),
         AppMode::Help => handle_help_mode(app, key),
     }
 }
@@ -171,6 +172,11 @@ fn handle_confirm_mode(app: &mut App, key: KeyEvent) -> InputResult {
 
         _ => InputResult::Continue,
     }
+}
+
+fn handle_deleting_mode(_key: KeyEvent) -> InputResult {
+    // Ignore all key input during deletion
+    InputResult::Continue
 }
 
 fn handle_help_mode(app: &mut App, key: KeyEvent) -> InputResult {
@@ -430,6 +436,70 @@ mod tests {
         assert_eq!(app.mode, AppMode::Normal);
     }
 
+    #[test]
+    fn test_confirm_mode_cancel_upper_n() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Confirm;
+
+        let result = handle_key_event(&mut app, key_shift('N'));
+
+        assert!(matches!(result, InputResult::Continue));
+        assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    #[test]
+    fn test_confirm_mode_accept_y() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Confirm;
+        app.confirm_action = Some(crate::app::ConfirmAction::DeleteSingle);
+        app.selected_worktree = 1; // non-main worktree
+
+        let result = handle_key_event(&mut app, key(KeyCode::Char('y')));
+
+        assert!(matches!(result, InputResult::Continue));
+        // Should transition to Deleting mode (background delete started)
+        assert_eq!(app.mode, AppMode::Deleting);
+    }
+
+    #[test]
+    fn test_confirm_mode_accept_enter() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Confirm;
+        app.confirm_action = Some(crate::app::ConfirmAction::DeleteSingle);
+        app.selected_worktree = 1; // non-main worktree
+
+        let result = handle_key_event(&mut app, key(KeyCode::Enter));
+
+        assert!(matches!(result, InputResult::Continue));
+        assert_eq!(app.mode, AppMode::Deleting);
+    }
+
+    #[test]
+    fn test_confirm_mode_accept_upper_y_deletes_branch() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Confirm;
+        app.confirm_action = Some(crate::app::ConfirmAction::DeleteSingle);
+        app.selected_worktree = 1; // non-main worktree
+
+        let result = handle_key_event(&mut app, key_shift('Y'));
+
+        assert!(matches!(result, InputResult::Continue));
+        // Y triggers confirm_action(true) which also deletes branch
+        assert_eq!(app.mode, AppMode::Deleting);
+    }
+
+    #[test]
+    fn test_confirm_mode_ignores_other_keys() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Confirm;
+        app.confirm_action = Some(crate::app::ConfirmAction::DeleteSingle);
+
+        let result = handle_key_event(&mut app, key(KeyCode::Char('x')));
+
+        assert!(matches!(result, InputResult::Continue));
+        assert_eq!(app.mode, AppMode::Confirm);
+    }
+
     // ========== Help Mode Tests ==========
 
     #[test]
@@ -475,9 +545,18 @@ mod tests {
         let result = handle_key_event(&mut app, key_shift('D'));
 
         assert!(matches!(result, InputResult::Continue));
-        // Should enter confirm mode for prune (or show message if no merged worktrees)
-        // Since test app has no merged worktrees, it shows a message
-        assert!(app.message.is_some());
+        // Should either enter confirm mode (merged worktrees found)
+        // or show "no merged worktrees" message (none found).
+        // The outcome depends on git repo state, so we verify that
+        // the key triggers the prune flow rather than being treated as input.
+        assert!(
+            app.mode == AppMode::Confirm || app.message.is_some(),
+            "Shift+D should trigger prune flow, not text input"
+        );
+        assert!(
+            app.input.is_empty(),
+            "Shift+D should not add to search input"
+        );
     }
 
     #[test]
@@ -503,5 +582,27 @@ mod tests {
         assert!(matches!(result, InputResult::Continue));
         // Lowercase 'd' should be added as search input
         assert_eq!(app.input, "d");
+    }
+
+    // ========== Deleting Mode Tests ==========
+
+    #[test]
+    fn test_deleting_mode_ignores_all_keys() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Deleting;
+
+        // All keys should be ignored during deletion
+        for key_event in [
+            key(KeyCode::Char('q')),
+            key(KeyCode::Esc),
+            key(KeyCode::Enter),
+            key(KeyCode::Char('y')),
+            key_ctrl('c'),
+            key_ctrl('q'),
+        ] {
+            let result = handle_key_event(&mut app, key_event);
+            assert!(matches!(result, InputResult::Continue));
+            assert_eq!(app.mode, AppMode::Deleting);
+        }
     }
 }
