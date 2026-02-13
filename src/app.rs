@@ -351,9 +351,16 @@ impl App {
             }
 
             let branch_name = self.input.clone();
-            let worktree_name = self
+            let worktree_name = match self
                 .config
-                .generate_worktree_name(&branch_name, repo_info.as_ref());
+                .generate_worktree_name(&branch_name, repo_info.as_ref())
+            {
+                Ok(name) => name,
+                Err(e) => {
+                    self.message = Some(format!("{}", e));
+                    return Ok(());
+                }
+            };
 
             // Create worktree with a new branch (atomic operation)
             let worktree = match self.git.create_worktree_with_new_branch(
@@ -409,8 +416,16 @@ impl App {
 
         // Use input as worktree name, or branch name if input is empty
         let worktree_name = if self.input.is_empty() {
-            self.config
+            match self
+                .config
                 .generate_worktree_name(&branch_name, repo_info.as_ref())
+            {
+                Ok(name) => name,
+                Err(e) => {
+                    self.message = Some(format!("{}", e));
+                    return Ok(());
+                }
+            }
         } else {
             self.input.clone()
         };
