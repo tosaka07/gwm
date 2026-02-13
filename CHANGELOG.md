@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2026-02-13
+
+### Added
+- Run worktree deletion in background with spinner animation to prevent UI freezing
+
+### Fixed
+- Fix confirm dialog using wrong worktree list when search filter is active
+- Detect and report unreplaced template variables in naming configuration
+- Support ssh:// and git:// protocol URLs in remote URL parsing
+
+### Changed
+- Unify confirm dialog shortcut styling with color-coded key/description spans
+
+### Chore
+- Update dependencies to fix security advisories
+
 ## [0.4.0] - 2026-02-02
 
 ### Added
