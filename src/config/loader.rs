@@ -11,6 +11,8 @@ pub enum ConfigError {
     IoError(#[from] std::io::Error),
     #[error("Failed to parse config file: {0}")]
     ParseError(#[from] toml::de::Error),
+    #[error("Unresolved template variable(s) in naming template: {0}")]
+    UnresolvedTemplateVariable(String),
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -53,11 +55,12 @@ impl NamingConfig {
 
     /// Generate worktree directory name from branch name using template
     /// Supports variables: {branch}, {host}, {owner}, {repository}
+    /// Returns an error if template variables remain unreplaced
     pub fn generate_worktree_name(
         &self,
         branch_name: &str,
         repo_info: Option<&RepoInfo>,
-    ) -> String {
+    ) -> Result<String, ConfigError> {
         let sanitized_branch = self.sanitize(branch_name);
 
         if let Some(template) = &self.template {
@@ -70,10 +73,27 @@ impl NamingConfig {
                     .replace("{repository}", &info.repository);
             }
 
-            result
+            let unreplaced = Self::find_unreplaced_variables(&result);
+            if !unreplaced.is_empty() {
+                return Err(ConfigError::UnresolvedTemplateVariable(
+                    unreplaced.join(", "),
+                ));
+            }
+
+            Ok(result)
         } else {
-            sanitized_branch
+            Ok(sanitized_branch)
         }
+    }
+
+    /// Find unreplaced template variables in a string
+    fn find_unreplaced_variables(s: &str) -> Vec<&'static str> {
+        let known_variables = ["{host}", "{owner}", "{repository}"];
+        known_variables
+            .iter()
+            .filter(|var| s.contains(**var))
+            .copied()
+            .collect()
     }
 }
 
@@ -236,7 +256,7 @@ impl Config {
         &self,
         branch_name: &str,
         repo_info: Option<&RepoInfo>,
-    ) -> String {
+    ) -> Result<String, ConfigError> {
         self.naming.generate_worktree_name(branch_name, repo_info)
     }
 
@@ -951,7 +971,9 @@ mod tests {
     fn test_naming_generate_worktree_name_without_template() {
         let naming = NamingConfig::default();
 
-        let result = naming.generate_worktree_name("feature/login", None);
+        let result = naming
+            .generate_worktree_name("feature/login", None)
+            .unwrap();
 
         assert_eq!(result, "feature-login");
     }
@@ -963,7 +985,9 @@ mod tests {
             sanitize_chars: None,
         };
 
-        let result = naming.generate_worktree_name("feature/login", None);
+        let result = naming
+            .generate_worktree_name("feature/login", None)
+            .unwrap();
 
         assert_eq!(result, "wt-feature-login");
     }
@@ -975,7 +999,7 @@ mod tests {
             sanitize_chars: None,
         };
 
-        let result = naming.generate_worktree_name("main", None);
+        let result = naming.generate_worktree_name("main", None).unwrap();
 
         assert_eq!(result, "main-dev");
     }
@@ -990,7 +1014,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = config.generate_worktree_name("feature/test", None);
+        let result = config.generate_worktree_name("feature/test", None).unwrap();
 
         assert_eq!(result, "worktree-feature-test");
     }
@@ -1009,7 +1033,9 @@ mod tests {
             repository: "myrepo".to_string(),
         };
 
-        let result = naming.generate_worktree_name("feature/login", Some(&repo_info));
+        let result = naming
+            .generate_worktree_name("feature/login", Some(&repo_info))
+            .unwrap();
 
         assert_eq!(result, "github.com/user/myrepo/feature-login");
     }
@@ -1028,9 +1054,55 @@ mod tests {
             repository: "project".to_string(),
         };
 
-        let result = naming.generate_worktree_name("main", Some(&repo_info));
+        let result = naming
+            .generate_worktree_name("main", Some(&repo_info))
+            .unwrap();
 
         assert_eq!(result, "myorg-project-main");
+    }
+
+    #[test]
+    fn test_naming_generate_worktree_name_unreplaced_variables_error() {
+        let naming = NamingConfig {
+            template: Some("{host}/{owner}/{repository}/{branch}".to_string()),
+            sanitize_chars: None,
+        };
+
+        let result = naming.generate_worktree_name("feature/login", None);
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("{host}"));
+        assert!(err_msg.contains("{owner}"));
+        assert!(err_msg.contains("{repository}"));
+    }
+
+    #[test]
+    fn test_naming_generate_worktree_name_partial_unreplaced_variables() {
+        let naming = NamingConfig {
+            template: Some("{owner}-{branch}".to_string()),
+            sanitize_chars: None,
+        };
+
+        let result = naming.generate_worktree_name("main", None);
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("{owner}"));
+        assert!(!err_msg.contains("{host}"));
+    }
+
+    #[test]
+    fn test_naming_generate_worktree_name_branch_only_template_no_error() {
+        let naming = NamingConfig {
+            template: Some("wt-{branch}".to_string()),
+            sanitize_chars: None,
+        };
+
+        let result = naming.generate_worktree_name("feature/login", None);
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "wt-feature-login");
     }
 
     // ========== Global Config Path Tests ==========
