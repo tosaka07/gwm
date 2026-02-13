@@ -75,23 +75,54 @@ pub struct RepoInfo {
 impl RepoInfo {
     /// Parse repository info from a remote URL
     /// Supports:
-    /// - SSH: git@github.com:owner/repo.git
+    /// - SSH (SCP-like): git@github.com:owner/repo.git
+    /// - SSH (URL): ssh://git@github.com/owner/repo.git
     /// - HTTPS: https://github.com/owner/repo.git
     /// - HTTPS with user: https://user@github.com/owner/repo.git
+    /// - Git protocol: git://github.com/owner/repo.git
     pub fn from_url(url: &str) -> Option<Self> {
         let url = url.trim();
 
-        // SSH format: git@github.com:owner/repo.git
+        // SSH SCP-like format: git@github.com:owner/repo.git
         if url.starts_with("git@") {
             let rest = url.strip_prefix("git@")?;
-            let (host, path) = rest.split_once(':')?;
-            let path = path.trim_end_matches(".git");
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() >= 2 {
+            if let Some((host, path)) = rest.split_once(':') {
+                let path = path.trim_end_matches(".git");
+                let parts: Vec<&str> = path.split('/').collect();
+                if parts.len() >= 2 {
+                    return Some(Self {
+                        host: host.to_string(),
+                        owner: parts[0].to_string(),
+                        repository: parts[1..].join("/"),
+                    });
+                }
+            }
+        }
+
+        // SSH/Git protocol URL: ssh://[user@]host[:port]/owner/repo.git
+        //                       git://host[:port]/owner/repo.git
+        if url.starts_with("ssh://") || url.starts_with("git://") {
+            let url = url
+                .strip_prefix("ssh://")
+                .or_else(|| url.strip_prefix("git://"))?;
+
+            // Remove user@ prefix if present
+            let url = if let Some(at_pos) = url.find('@') {
+                &url[at_pos + 1..]
+            } else {
+                url
+            };
+
+            let parts: Vec<&str> = url.split('/').collect();
+            if parts.len() >= 3 {
+                // host may contain :port, strip it
+                let host = parts[0].split(':').next().unwrap_or(parts[0]).to_string();
+                let owner = parts[1].to_string();
+                let repo = parts[2..].join("/").trim_end_matches(".git").to_string();
                 return Some(Self {
-                    host: host.to_string(),
-                    owner: parts[0].to_string(),
-                    repository: parts[1..].join("/"),
+                    host,
+                    owner,
+                    repository: repo,
                 });
             }
         }
@@ -999,11 +1030,85 @@ mod tests {
     }
 
     #[test]
+    fn test_repo_info_from_ssh_protocol_url() {
+        let url = "ssh://git@github.com/owner/repo.git";
+        let info = RepoInfo::from_url(url).unwrap();
+
+        assert_eq!(info.host, "github.com");
+        assert_eq!(info.owner, "owner");
+        assert_eq!(info.repository, "repo");
+    }
+
+    #[test]
+    fn test_repo_info_from_ssh_protocol_url_with_port() {
+        let url = "ssh://git@github.com:22/owner/repo.git";
+        let info = RepoInfo::from_url(url).unwrap();
+
+        assert_eq!(info.host, "github.com");
+        assert_eq!(info.owner, "owner");
+        assert_eq!(info.repository, "repo");
+    }
+
+    #[test]
+    fn test_repo_info_from_ssh_protocol_url_without_user() {
+        let url = "ssh://github.com/owner/repo.git";
+        let info = RepoInfo::from_url(url).unwrap();
+
+        assert_eq!(info.host, "github.com");
+        assert_eq!(info.owner, "owner");
+        assert_eq!(info.repository, "repo");
+    }
+
+    #[test]
+    fn test_repo_info_from_git_protocol_url() {
+        let url = "git://github.com/owner/repo.git";
+        let info = RepoInfo::from_url(url).unwrap();
+
+        assert_eq!(info.host, "github.com");
+        assert_eq!(info.owner, "owner");
+        assert_eq!(info.repository, "repo");
+    }
+
+    #[test]
+    fn test_repo_info_from_ssh_protocol_nested_path() {
+        let url = "ssh://git@gitlab.com/group/subgroup/project.git";
+        let info = RepoInfo::from_url(url).unwrap();
+
+        assert_eq!(info.host, "gitlab.com");
+        assert_eq!(info.owner, "group");
+        assert_eq!(info.repository, "subgroup/project");
+    }
+
+    #[test]
+    fn test_repo_info_from_ssh_protocol_no_git_suffix() {
+        let url = "ssh://git@github.com/owner/repo";
+        let info = RepoInfo::from_url(url).unwrap();
+
+        assert_eq!(info.host, "github.com");
+        assert_eq!(info.owner, "owner");
+        assert_eq!(info.repository, "repo");
+    }
+
+    #[test]
     fn test_repo_info_invalid_url() {
         let url = "not-a-valid-url";
         let info = RepoInfo::from_url(url);
 
         assert!(info.is_none());
+    }
+
+    #[test]
+    fn test_repo_info_file_protocol_returns_none() {
+        let url = "file:///path/to/repo.git";
+        let info = RepoInfo::from_url(url);
+
+        assert!(info.is_none());
+    }
+
+    #[test]
+    fn test_repo_info_empty_url() {
+        assert!(RepoInfo::from_url("").is_none());
+        assert!(RepoInfo::from_url("   ").is_none());
     }
 
     // ========== find_merged_branches Tests ==========
