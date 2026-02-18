@@ -483,6 +483,7 @@ fn render_create_footer(colors: &ThemeColors) -> Paragraph<'static> {
 
 fn draw_confirm_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
     let area = centered_rect(60, 30, frame.area());
+    let clear_area = expand_area(area, frame.area());
 
     let message = match app.confirm_action {
         Some(ConfirmAction::DeleteSingle) => {
@@ -537,12 +538,13 @@ fn draw_confirm_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
             .padding(Padding::horizontal(1)),
     );
 
-    frame.render_widget(Clear, area);
+    frame.render_widget(Clear, clear_area);
     frame.render_widget(dialog, area);
 }
 
 fn draw_deleting_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
     let area = centered_rect(50, 20, frame.area());
+    let clear_area = expand_area(area, frame.area());
 
     let spinner = SPINNER_FRAMES[(app.tick as usize) % SPINNER_FRAMES.len()];
     let message = format!(
@@ -569,12 +571,13 @@ fn draw_deleting_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
             .padding(Padding::horizontal(1)),
     );
 
-    frame.render_widget(Clear, area);
+    frame.render_widget(Clear, clear_area);
     frame.render_widget(dialog, area);
 }
 
 fn draw_help_dialog(frame: &mut Frame, colors: &ThemeColors) {
     let area = centered_rect(70, 80, frame.area());
+    let clear_area = expand_area(area, frame.area());
 
     let help_text = vec![
         Line::from(vec![Span::styled(
@@ -665,8 +668,22 @@ fn draw_help_dialog(frame: &mut Frame, colors: &ThemeColors) {
             .padding(Padding::horizontal(1)),
     );
 
-    frame.render_widget(Clear, area);
+    frame.render_widget(Clear, clear_area);
     frame.render_widget(dialog, area);
+}
+
+/// Expand a Rect by 1 cell on each side, clamped to the given bounds
+fn expand_area(area: Rect, bounds: Rect) -> Rect {
+    let x = area.x.saturating_sub(1).max(bounds.x);
+    let y = area.y.saturating_sub(1).max(bounds.y);
+    let right = (area.x + area.width + 1).min(bounds.x + bounds.width);
+    let bottom = (area.y + area.height + 1).min(bounds.y + bounds.height);
+    Rect {
+        x,
+        y,
+        width: right.saturating_sub(x),
+        height: bottom.saturating_sub(y),
+    }
 }
 
 /// Create a centered rectangle with given percentage width and height
