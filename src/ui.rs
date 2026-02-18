@@ -483,6 +483,7 @@ fn render_create_footer(colors: &ThemeColors) -> Paragraph<'static> {
 
 fn draw_confirm_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
     let area = centered_rect(60, 30, frame.area());
+    let clear_area = expand_area(area, frame.area());
 
     let message = match app.confirm_action {
         Some(ConfirmAction::DeleteSingle) => {
@@ -505,20 +506,20 @@ fn draw_confirm_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
     };
 
     let shortcut_line = Line::from(vec![
-        Span::styled("y", Style::default().fg(colors.key)),
-        Span::styled(": worktree  ", Style::default().fg(colors.description)),
+        Span::styled(" y", Style::default().fg(colors.key)),
+        Span::styled(": worktree ", Style::default().fg(colors.description)),
         Span::styled("Y", Style::default().fg(colors.key)),
         Span::styled(
-            ": worktree & branch  ",
+            ": worktree & branch ",
             Style::default().fg(colors.description),
         ),
         Span::styled("n", Style::default().fg(colors.key)),
         Span::styled("/", Style::default().fg(colors.description)),
         Span::styled("Esc", Style::default().fg(colors.key)),
-        Span::styled(": cancel", Style::default().fg(colors.description)),
+        Span::styled(": cancel ", Style::default().fg(colors.description)),
     ]);
 
-    let mut lines: Vec<Line> = message
+    let lines: Vec<Line> = message
         .lines()
         .map(|l| {
             Line::from(Span::styled(
@@ -527,23 +528,23 @@ fn draw_confirm_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
             ))
         })
         .collect();
-    lines.push(Line::from(""));
-    lines.push(shortcut_line);
 
     let dialog = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
             .title("Confirm")
+            .title_bottom(shortcut_line)
             .style(Style::default().fg(colors.warning))
             .padding(Padding::horizontal(1)),
     );
 
-    frame.render_widget(Clear, area);
+    frame.render_widget(Clear, clear_area);
     frame.render_widget(dialog, area);
 }
 
 fn draw_deleting_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
     let area = centered_rect(50, 20, frame.area());
+    let clear_area = expand_area(area, frame.area());
 
     let spinner = SPINNER_FRAMES[(app.tick as usize) % SPINNER_FRAMES.len()];
     let message = format!(
@@ -551,6 +552,11 @@ fn draw_deleting_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
         spinner,
         app.deleting_message.as_deref().unwrap_or("Deleting...")
     );
+
+    let wait_hint = Line::from(vec![Span::styled(
+        " Please wait... ",
+        Style::default().fg(colors.text_muted),
+    )]);
 
     let dialog = Paragraph::new(Line::from(vec![Span::styled(
         message,
@@ -560,16 +566,18 @@ fn draw_deleting_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
         Block::default()
             .borders(Borders::ALL)
             .title("Processing")
+            .title_bottom(wait_hint)
             .style(Style::default().fg(colors.warning))
             .padding(Padding::horizontal(1)),
     );
 
-    frame.render_widget(Clear, area);
+    frame.render_widget(Clear, clear_area);
     frame.render_widget(dialog, area);
 }
 
 fn draw_help_dialog(frame: &mut Frame, colors: &ThemeColors) {
     let area = centered_rect(70, 80, frame.area());
+    let clear_area = expand_area(area, frame.area());
 
     let help_text = vec![
         Line::from(vec![Span::styled(
@@ -640,23 +648,42 @@ fn draw_help_dialog(frame: &mut Frame, colors: &ThemeColors) {
             Span::styled("  Esc / C-q", Style::default().fg(colors.key)),
             Span::styled("   Quit / Cancel", Style::default().fg(colors.description)),
         ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "Press any key to close",
-            Style::default().fg(colors.text_muted),
-        )]),
     ];
+
+    let close_hint = Line::from(vec![
+        Span::styled(" Esc", Style::default().fg(colors.key)),
+        Span::styled("/", Style::default().fg(colors.description)),
+        Span::styled("Enter", Style::default().fg(colors.key)),
+        Span::styled("/", Style::default().fg(colors.description)),
+        Span::styled("q", Style::default().fg(colors.key)),
+        Span::styled(": close ", Style::default().fg(colors.description)),
+    ]);
 
     let dialog = Paragraph::new(help_text).block(
         Block::default()
             .borders(Borders::ALL)
             .title("Help")
+            .title_bottom(close_hint)
             .style(Style::default().fg(colors.header))
             .padding(Padding::horizontal(1)),
     );
 
-    frame.render_widget(Clear, area);
+    frame.render_widget(Clear, clear_area);
     frame.render_widget(dialog, area);
+}
+
+/// Expand a Rect by 1 cell on each side, clamped to the given bounds
+fn expand_area(area: Rect, bounds: Rect) -> Rect {
+    let x = area.x.saturating_sub(1).max(bounds.x);
+    let y = area.y.saturating_sub(1).max(bounds.y);
+    let right = (area.x + area.width + 1).min(bounds.x + bounds.width);
+    let bottom = (area.y + area.height + 1).min(bounds.y + bounds.height);
+    Rect {
+        x,
+        y,
+        width: right.saturating_sub(x),
+        height: bottom.saturating_sub(y),
+    }
 }
 
 /// Create a centered rectangle with given percentage width and height
