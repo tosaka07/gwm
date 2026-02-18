@@ -42,7 +42,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Load configuration
-    let config = config::load_config(cli.config.as_deref()).unwrap_or_default();
+    let (config, config_sources) = config::load_config_with_sources(cli.config.as_deref())
+        .unwrap_or_else(|_| (config::Config::default(), config::ConfigSources::default()));
 
     // Initialize git manager
     let git = match git::GitManager::new() {
@@ -55,7 +56,7 @@ fn main() -> Result<()> {
     };
 
     // Create application
-    let mut app = match App::new(config, git) {
+    let mut app = match App::new(config, config_sources, git) {
         Ok(app) => app,
         Err(e) => {
             eprintln!("Error initializing application: {}", e);

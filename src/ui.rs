@@ -31,23 +31,23 @@ fn inner_area(frame: &Frame) -> Rect {
     })
 }
 
-pub fn draw(frame: &mut Frame, app: &App) {
+pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = inner_area(frame);
-    let colors = &app.theme.colors;
+    let colors = app.theme.colors.clone();
     match app.mode {
-        AppMode::Normal => draw_normal_mode(frame, app, area, colors),
-        AppMode::Create => draw_create_mode(frame, app, area, colors),
+        AppMode::Normal => draw_normal_mode(frame, app, area, &colors),
+        AppMode::Create => draw_create_mode(frame, app, area, &colors),
         AppMode::Confirm => {
-            draw_normal_mode(frame, app, area, colors);
-            draw_confirm_dialog(frame, app, colors);
+            draw_normal_mode(frame, app, area, &colors);
+            draw_confirm_dialog(frame, app, &colors);
         }
         AppMode::Deleting => {
-            draw_normal_mode(frame, app, area, colors);
-            draw_deleting_dialog(frame, app, colors);
+            draw_normal_mode(frame, app, area, &colors);
+            draw_deleting_dialog(frame, app, &colors);
         }
-        AppMode::Help => {
-            draw_normal_mode(frame, app, area, colors);
-            draw_help_dialog(frame, colors);
+        AppMode::Config => {
+            draw_normal_mode(frame, app, area, &colors);
+            draw_config_dialog(frame, app, &colors);
         }
     }
 }
@@ -462,7 +462,7 @@ fn render_normal_footer(colors: &ThemeColors) -> Paragraph<'static> {
         Span::styled("D", Style::default().fg(colors.key)),
         Span::styled(": prune  ", Style::default().fg(colors.description)),
         Span::styled("?", Style::default().fg(colors.key)),
-        Span::styled(": help  ", Style::default().fg(colors.description)),
+        Span::styled(": config  ", Style::default().fg(colors.description)),
         Span::styled("C-q", Style::default().fg(colors.key)),
         Span::styled(": quit", Style::default().fg(colors.description)),
     ]))
@@ -575,83 +575,130 @@ fn draw_deleting_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
     frame.render_widget(dialog, area);
 }
 
-fn draw_help_dialog(frame: &mut Frame, colors: &ThemeColors) {
+fn draw_config_dialog(frame: &mut Frame, app: &mut App, colors: &ThemeColors) {
     let area = centered_rect(70, 80, frame.area());
     let clear_area = expand_area(area, frame.area());
 
-    let help_text = vec![
-        Line::from(vec![Span::styled(
-            "Keybindings",
-            Style::default()
-                .fg(colors.header)
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "Navigation",
-            Style::default().add_modifier(Modifier::UNDERLINED),
-        )]),
-        Line::from(vec![
-            Span::styled("  ↑ / C-p", Style::default().fg(colors.key)),
-            Span::styled("     Move up", Style::default().fg(colors.description)),
-        ]),
-        Line::from(vec![
-            Span::styled("  ↓ / C-n", Style::default().fg(colors.key)),
-            Span::styled("     Move down", Style::default().fg(colors.description)),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "Actions",
-            Style::default().add_modifier(Modifier::UNDERLINED),
-        )]),
-        Line::from(vec![
-            Span::styled("  Enter", Style::default().fg(colors.key)),
-            Span::styled(
-                "       Open worktree / Create",
-                Style::default().fg(colors.description),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("  C-o", Style::default().fg(colors.key)),
-            Span::styled(
-                "         Enter create mode",
-                Style::default().fg(colors.description),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("  C-d", Style::default().fg(colors.key)),
-            Span::styled(
-                "         Delete worktree",
-                Style::default().fg(colors.description),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("  D", Style::default().fg(colors.key)),
-            Span::styled(
-                "           Prune merged worktrees",
-                Style::default().fg(colors.description),
-            ),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "General",
-            Style::default().add_modifier(Modifier::UNDERLINED),
-        )]),
-        Line::from(vec![
-            Span::styled("  ?", Style::default().fg(colors.key)),
-            Span::styled(
-                "           Show this help",
-                Style::default().fg(colors.description),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("  Esc / C-q", Style::default().fg(colors.key)),
-            Span::styled("   Quit / Cancel", Style::default().fg(colors.description)),
-        ]),
-    ];
+    let sources = &app.config_sources;
+    let mut lines: Vec<Line> = Vec::new();
+
+    // --- Global section ---
+    lines.push(Line::from(vec![Span::styled(
+        "Global",
+        Style::default()
+            .fg(colors.header)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    match &sources.global.path {
+        Some(path) => {
+            lines.push(Line::from(vec![Span::styled(
+                format!("  {}", app.format_path(&path.to_string_lossy())),
+                Style::default().fg(colors.text_muted),
+            )]));
+            let entries = config_entries(&sources.global.config);
+            if entries.is_empty() {
+                lines.push(Line::from(vec![Span::styled(
+                    "  (no settings)",
+                    Style::default().fg(colors.text_muted),
+                )]));
+            } else {
+                for (key, value) in &entries {
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {} = ", key), Style::default().fg(colors.text)),
+                        Span::styled(value.clone(), Style::default().fg(colors.branch)),
+                    ]));
+                }
+            }
+        }
+        None => {
+            lines.push(Line::from(vec![Span::styled(
+                "  (not found)",
+                Style::default().fg(colors.text_muted),
+            )]));
+        }
+    }
+
+    lines.push(Line::from(""));
+
+    // --- Local section ---
+    lines.push(Line::from(vec![Span::styled(
+        "Local",
+        Style::default()
+            .fg(colors.header)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    match &sources.local.path {
+        Some(path) => {
+            lines.push(Line::from(vec![Span::styled(
+                format!("  {}", app.format_path(&path.to_string_lossy())),
+                Style::default().fg(colors.text_muted),
+            )]));
+            let entries = config_entries(&sources.local.config);
+            if entries.is_empty() {
+                lines.push(Line::from(vec![Span::styled(
+                    "  (no settings)",
+                    Style::default().fg(colors.text_muted),
+                )]));
+            } else {
+                for (key, value) in &entries {
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {} = ", key), Style::default().fg(colors.text)),
+                        Span::styled(value.clone(), Style::default().fg(colors.branch)),
+                    ]));
+                }
+            }
+        }
+        None => {
+            lines.push(Line::from(vec![Span::styled(
+                "  (not found)",
+                Style::default().fg(colors.text_muted),
+            )]));
+        }
+    }
+
+    lines.push(Line::from(""));
+
+    // --- Effective section ---
+    lines.push(Line::from(vec![Span::styled(
+        "Effective",
+        Style::default()
+            .fg(colors.header)
+            .add_modifier(Modifier::BOLD),
+    )]));
+
+    let effective_entries = effective_config_entries(sources);
+    for (key, value, source) in &effective_entries {
+        let source_style = match source.as_str() {
+            "global" | "local" | "env" => Style::default().fg(colors.warning),
+            _ => Style::default().fg(colors.text_muted),
+        };
+        let source_label = match source.as_str() {
+            "global" => " ← global",
+            "local" => " ← local",
+            "env" => " ← env",
+            _ => " (default)",
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {:<22}= ", key), Style::default().fg(colors.text)),
+            Span::styled(format!("{:<20}", value), Style::default().fg(colors.branch)),
+            Span::styled(source_label, source_style),
+        ]));
+    }
+
+    // Calculate scroll max: content lines - visible lines inside the dialog
+    // area.height minus 2 (top/bottom border) is the visible content height
+    let visible_height = area.height.saturating_sub(2);
+    let content_height = lines.len() as u16;
+    app.config_scroll_max = content_height.saturating_sub(visible_height);
+    // Clamp current scroll position
+    if app.config_scroll > app.config_scroll_max {
+        app.config_scroll = app.config_scroll_max;
+    }
 
     let close_hint = Line::from(vec![
-        Span::styled(" Esc", Style::default().fg(colors.key)),
+        Span::styled(" ↑↓", Style::default().fg(colors.key)),
+        Span::styled(": scroll  ", Style::default().fg(colors.description)),
+        Span::styled("Esc", Style::default().fg(colors.key)),
         Span::styled("/", Style::default().fg(colors.description)),
         Span::styled("Enter", Style::default().fg(colors.key)),
         Span::styled("/", Style::default().fg(colors.description)),
@@ -659,10 +706,10 @@ fn draw_help_dialog(frame: &mut Frame, colors: &ThemeColors) {
         Span::styled(": close ", Style::default().fg(colors.description)),
     ]);
 
-    let dialog = Paragraph::new(help_text).block(
+    let dialog = Paragraph::new(lines).scroll((app.config_scroll, 0)).block(
         Block::default()
             .borders(Borders::ALL)
-            .title("Help")
+            .title("Configuration")
             .title_bottom(close_hint)
             .style(Style::default().fg(colors.header))
             .padding(Padding::horizontal(1)),
@@ -670,6 +717,149 @@ fn draw_help_dialog(frame: &mut Frame, colors: &ThemeColors) {
 
     frame.render_widget(Clear, clear_area);
     frame.render_widget(dialog, area);
+}
+
+/// Extract explicitly set config entries as (key, value) pairs
+fn config_entries(config: &crate::config::Config) -> Vec<(&'static str, String)> {
+    let mut entries = Vec::new();
+    if let Some(ref v) = config.worktree.basedir {
+        entries.push(("worktree.basedir", format!("\"{}\"", v)));
+    }
+    if let Some(v) = config.worktree.auto_mkdir {
+        entries.push(("worktree.auto_mkdir", v.to_string()));
+    }
+    if let Some(ref v) = config.naming.template {
+        entries.push(("naming.template", format!("\"{}\"", v)));
+    }
+    if config.naming.sanitize_chars.is_some() {
+        entries.push(("naming.sanitize_chars", "(custom)".to_string()));
+    }
+    if let Some(v) = config.ui.icons {
+        entries.push(("ui.icons", v.to_string()));
+    }
+    if let Some(v) = config.ui.tilde_home {
+        entries.push(("ui.tilde_home", v.to_string()));
+    }
+    if let Some(ref v) = config.ui.theme {
+        entries.push(("ui.theme", format!("\"{}\"", v)));
+    }
+    if config.ui.colors.is_some() {
+        entries.push(("ui.colors", "(custom)".to_string()));
+    }
+    if let Some(ref v) = config.copy_files {
+        entries.push(("copy_files", format!("{:?}", v)));
+    }
+    if let Some(ref v) = config.setup_commands {
+        entries.push(("setup_commands", format!("{:?}", v)));
+    }
+    entries
+}
+
+/// Build effective config entries with source information
+fn effective_config_entries(
+    sources: &crate::config::ConfigSources,
+) -> Vec<(&'static str, String, String)> {
+    let global = &sources.global.config;
+    let local = &sources.local.config;
+    let env = &sources.env;
+
+    let mut entries = Vec::new();
+
+    // worktree.basedir
+    let (val, src) = resolve_source_str(
+        &env.worktree.basedir,
+        &local.worktree.basedir,
+        &global.worktree.basedir,
+        "~/worktrees",
+    );
+    entries.push(("worktree.basedir", val, src));
+
+    // worktree.auto_mkdir
+    let (val, src) = resolve_source_bool(
+        &env.worktree.auto_mkdir,
+        &local.worktree.auto_mkdir,
+        &global.worktree.auto_mkdir,
+        true,
+    );
+    entries.push(("worktree.auto_mkdir", val, src));
+
+    // naming.template
+    let (val, src) = resolve_source_opt_str(
+        &env.naming.template,
+        &local.naming.template,
+        &global.naming.template,
+    );
+    entries.push(("naming.template", val, src));
+
+    // ui.icons
+    let (val, src) = resolve_source_bool(&env.ui.icons, &local.ui.icons, &global.ui.icons, true);
+    entries.push(("ui.icons", val, src));
+
+    // ui.tilde_home
+    let (val, src) = resolve_source_bool(
+        &env.ui.tilde_home,
+        &local.ui.tilde_home,
+        &global.ui.tilde_home,
+        true,
+    );
+    entries.push(("ui.tilde_home", val, src));
+
+    // ui.theme
+    let (val, src) =
+        resolve_source_str(&env.ui.theme, &local.ui.theme, &global.ui.theme, "default");
+    entries.push(("ui.theme", val, src));
+
+    entries
+}
+
+fn resolve_source_str(
+    env: &Option<String>,
+    local: &Option<String>,
+    global: &Option<String>,
+    default: &str,
+) -> (String, String) {
+    if let Some(v) = env {
+        (v.clone(), "env".to_string())
+    } else if let Some(v) = local {
+        (v.clone(), "local".to_string())
+    } else if let Some(v) = global {
+        (v.clone(), "global".to_string())
+    } else {
+        (default.to_string(), "default".to_string())
+    }
+}
+
+fn resolve_source_opt_str(
+    env: &Option<String>,
+    local: &Option<String>,
+    global: &Option<String>,
+) -> (String, String) {
+    if let Some(v) = env {
+        (v.clone(), "env".to_string())
+    } else if let Some(v) = local {
+        (v.clone(), "local".to_string())
+    } else if let Some(v) = global {
+        (v.clone(), "global".to_string())
+    } else {
+        ("(none)".to_string(), "default".to_string())
+    }
+}
+
+fn resolve_source_bool(
+    env: &Option<bool>,
+    local: &Option<bool>,
+    global: &Option<bool>,
+    default: bool,
+) -> (String, String) {
+    if let Some(v) = env {
+        (v.to_string(), "env".to_string())
+    } else if let Some(v) = local {
+        (v.to_string(), "local".to_string())
+    } else if let Some(v) = global {
+        (v.to_string(), "global".to_string())
+    } else {
+        (default.to_string(), "default".to_string())
+    }
 }
 
 /// Expand a Rect by 1 cell on each side, clamped to the given bounds
@@ -733,5 +923,144 @@ mod tests {
 
         let result = format_branch_with_icon("feature/test-123", false);
         assert_eq!(result, "feature/test-123");
+    }
+
+    // ========== config_entries tests ==========
+
+    #[test]
+    fn test_config_entries_default_returns_empty() {
+        let config = crate::config::Config::default();
+        let entries = config_entries(&config);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_config_entries_with_values() {
+        let mut config = crate::config::Config::default();
+        config.worktree.basedir = Some("~/wt".to_string());
+        config.ui.icons = Some(false);
+        config.ui.theme = Some("classic".to_string());
+
+        let entries = config_entries(&config);
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0], ("worktree.basedir", "\"~/wt\"".to_string()));
+        assert_eq!(entries[1], ("ui.icons", "false".to_string()));
+        assert_eq!(entries[2], ("ui.theme", "\"classic\"".to_string()));
+    }
+
+    // ========== resolve_source tests ==========
+
+    #[test]
+    fn test_resolve_source_str_env_wins() {
+        let (val, src) = resolve_source_str(
+            &Some("env_val".to_string()),
+            &Some("local_val".to_string()),
+            &Some("global_val".to_string()),
+            "default",
+        );
+        assert_eq!(val, "env_val");
+        assert_eq!(src, "env");
+    }
+
+    #[test]
+    fn test_resolve_source_str_local_wins() {
+        let (val, src) = resolve_source_str(
+            &None,
+            &Some("local_val".to_string()),
+            &Some("global_val".to_string()),
+            "default",
+        );
+        assert_eq!(val, "local_val");
+        assert_eq!(src, "local");
+    }
+
+    #[test]
+    fn test_resolve_source_str_global_wins() {
+        let (val, src) =
+            resolve_source_str(&None, &None, &Some("global_val".to_string()), "default");
+        assert_eq!(val, "global_val");
+        assert_eq!(src, "global");
+    }
+
+    #[test]
+    fn test_resolve_source_str_default() {
+        let (val, src) = resolve_source_str(&None, &None, &None, "fallback");
+        assert_eq!(val, "fallback");
+        assert_eq!(src, "default");
+    }
+
+    #[test]
+    fn test_resolve_source_bool_priority() {
+        let (val, src) = resolve_source_bool(&Some(true), &Some(false), &None, false);
+        assert_eq!(val, "true");
+        assert_eq!(src, "env");
+
+        let (val, src) = resolve_source_bool(&None, &Some(false), &Some(true), true);
+        assert_eq!(val, "false");
+        assert_eq!(src, "local");
+
+        let (val, src) = resolve_source_bool(&None, &None, &Some(true), false);
+        assert_eq!(val, "true");
+        assert_eq!(src, "global");
+
+        let (val, src) = resolve_source_bool(&None, &None, &None, true);
+        assert_eq!(val, "true");
+        assert_eq!(src, "default");
+    }
+
+    #[test]
+    fn test_resolve_source_opt_str_none_default() {
+        let (val, src) = resolve_source_opt_str(&None, &None, &None);
+        assert_eq!(val, "(none)");
+        assert_eq!(src, "default");
+    }
+
+    #[test]
+    fn test_resolve_source_opt_str_with_value() {
+        let (val, src) = resolve_source_opt_str(&None, &Some("tmpl".to_string()), &None);
+        assert_eq!(val, "tmpl");
+        assert_eq!(src, "local");
+    }
+
+    // ========== effective_config_entries tests ==========
+
+    #[test]
+    fn test_effective_config_entries_all_defaults() {
+        let sources = crate::config::ConfigSources::default();
+        let entries = effective_config_entries(&sources);
+
+        assert_eq!(entries.len(), 6);
+        // All should be "default" source
+        for (_key, _val, src) in &entries {
+            assert_eq!(src, "default");
+        }
+    }
+
+    #[test]
+    fn test_effective_config_entries_mixed_sources() {
+        let mut sources = crate::config::ConfigSources::default();
+        sources.global.config.worktree.basedir = Some("~/global-wt".to_string());
+        sources.local.config.worktree.basedir = Some("~/local-wt".to_string());
+        sources.local.config.ui.icons = Some(false);
+
+        let entries = effective_config_entries(&sources);
+
+        // worktree.basedir: local wins over global
+        let basedir = entries
+            .iter()
+            .find(|(k, _, _)| *k == "worktree.basedir")
+            .unwrap();
+        assert_eq!(basedir.1, "~/local-wt");
+        assert_eq!(basedir.2, "local");
+
+        // ui.icons: local
+        let icons = entries.iter().find(|(k, _, _)| *k == "ui.icons").unwrap();
+        assert_eq!(icons.1, "false");
+        assert_eq!(icons.2, "local");
+
+        // ui.theme: default
+        let theme = entries.iter().find(|(k, _, _)| *k == "ui.theme").unwrap();
+        assert_eq!(theme.2, "default");
     }
 }

@@ -1,4 +1,4 @@
-use crate::config::{Config, RepositorySettings};
+use crate::config::{Config, ConfigSources, RepositorySettings};
 use crate::git::{Branch, GitManager, Worktree, WorktreeDetail};
 use crate::hooks::SetupRunner;
 use crate::theme::Theme;
@@ -22,7 +22,7 @@ pub enum AppMode {
     Create,
     Confirm,
     Deleting,
-    Help,
+    Config,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -64,13 +64,20 @@ pub struct App {
     pub theme: Theme,
     pub deleting_message: Option<String>,
     pub tick: u64,
+    pub config_sources: ConfigSources,
+    pub config_scroll: u16,
+    pub config_scroll_max: u16,
     config: Config,
     git: GitManager,
     delete_receiver: Option<mpsc::Receiver<DeleteResult>>,
 }
 
 impl App {
-    pub fn new(config: Config, git: GitManager) -> Result<Self, AppError> {
+    pub fn new(
+        config: Config,
+        config_sources: ConfigSources,
+        git: GitManager,
+    ) -> Result<Self, AppError> {
         let worktrees = git.list_worktrees()?;
         let branches = git.list_branches()?;
         let theme = Theme::from_config(Some(config.theme_name()), config.theme_colors());
@@ -92,6 +99,9 @@ impl App {
             theme,
             deleting_message: None,
             tick: 0,
+            config_sources,
+            config_scroll: 0,
+            config_scroll_max: 0,
             config,
             git,
             delete_receiver: None,
@@ -232,8 +242,19 @@ impl App {
         self.filter_worktrees();
     }
 
-    pub fn enter_help_mode(&mut self) {
-        self.mode = AppMode::Help;
+    pub fn enter_config_mode(&mut self) {
+        self.mode = AppMode::Config;
+        self.config_scroll = 0;
+    }
+
+    pub fn scroll_config_up(&mut self) {
+        self.config_scroll = self.config_scroll.saturating_sub(1);
+    }
+
+    pub fn scroll_config_down(&mut self) {
+        if self.config_scroll < self.config_scroll_max {
+            self.config_scroll = self.config_scroll.saturating_add(1);
+        }
     }
 
     pub fn enter_confirm_delete(&mut self) {
@@ -594,6 +615,9 @@ impl App {
             theme,
             deleting_message: None,
             tick: 0,
+            config_sources: ConfigSources::default(),
+            config_scroll: 0,
+            config_scroll_max: 0,
             config,
             git,
             delete_receiver: None,
@@ -969,12 +993,65 @@ mod tests {
     }
 
     #[test]
-    fn test_enter_help_mode() {
+    fn test_enter_config_mode() {
         let mut app = create_test_app();
 
-        app.enter_help_mode();
+        app.enter_config_mode();
 
-        assert_eq!(app.mode, AppMode::Help);
+        assert_eq!(app.mode, AppMode::Config);
+        assert_eq!(app.config_scroll, 0);
+    }
+
+    #[test]
+    fn test_enter_config_mode_resets_scroll() {
+        let mut app = create_test_app();
+        app.config_scroll = 5;
+
+        app.enter_config_mode();
+
+        assert_eq!(app.config_scroll, 0);
+    }
+
+    #[test]
+    fn test_scroll_config_up_at_zero() {
+        let mut app = create_test_app();
+        app.config_scroll = 0;
+
+        app.scroll_config_up();
+
+        assert_eq!(app.config_scroll, 0);
+    }
+
+    #[test]
+    fn test_scroll_config_up_decrements() {
+        let mut app = create_test_app();
+        app.config_scroll = 3;
+
+        app.scroll_config_up();
+
+        assert_eq!(app.config_scroll, 2);
+    }
+
+    #[test]
+    fn test_scroll_config_down_increments() {
+        let mut app = create_test_app();
+        app.config_scroll = 0;
+        app.config_scroll_max = 10;
+
+        app.scroll_config_down();
+
+        assert_eq!(app.config_scroll, 1);
+    }
+
+    #[test]
+    fn test_scroll_config_down_clamped_at_max() {
+        let mut app = create_test_app();
+        app.config_scroll = 5;
+        app.config_scroll_max = 5;
+
+        app.scroll_config_down();
+
+        assert_eq!(app.config_scroll, 5);
     }
 
     #[test]

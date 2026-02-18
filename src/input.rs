@@ -15,7 +15,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> InputResult {
         AppMode::Create => handle_create_mode(app, key),
         AppMode::Confirm => handle_confirm_mode(app, key),
         AppMode::Deleting => handle_deleting_mode(key),
-        AppMode::Help => handle_help_mode(app, key),
+        AppMode::Config => handle_config_mode(app, key),
     }
 }
 
@@ -86,9 +86,9 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) -> InputResult {
             InputResult::Continue
         }
 
-        // Help
+        // Config
         (KeyCode::Char('?'), _) => {
-            app.enter_help_mode();
+            app.enter_config_mode();
             InputResult::Continue
         }
 
@@ -179,10 +179,18 @@ fn handle_deleting_mode(_key: KeyEvent) -> InputResult {
     InputResult::Continue
 }
 
-fn handle_help_mode(app: &mut App, key: KeyEvent) -> InputResult {
-    match key.code {
-        KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+fn handle_config_mode(app: &mut App, key: KeyEvent) -> InputResult {
+    match (key.code, key.modifiers) {
+        (KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q'), _) => {
             app.enter_normal_mode();
+            InputResult::Continue
+        }
+        (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+            app.scroll_config_up();
+            InputResult::Continue
+        }
+        (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+            app.scroll_config_down();
             InputResult::Continue
         }
         _ => InputResult::Continue,
@@ -306,13 +314,13 @@ mod tests {
     }
 
     #[test]
-    fn test_normal_mode_enter_help() {
+    fn test_normal_mode_enter_config() {
         let mut app = create_test_app();
 
         let result = handle_key_event(&mut app, key(KeyCode::Char('?')));
 
         assert!(matches!(result, InputResult::Continue));
-        assert_eq!(app.mode, AppMode::Help);
+        assert_eq!(app.mode, AppMode::Config);
     }
 
     #[test]
@@ -500,12 +508,12 @@ mod tests {
         assert_eq!(app.mode, AppMode::Confirm);
     }
 
-    // ========== Help Mode Tests ==========
+    // ========== Config Mode Tests ==========
 
     #[test]
-    fn test_help_mode_exit_esc() {
+    fn test_config_mode_exit_esc() {
         let mut app = create_test_app();
-        app.mode = AppMode::Help;
+        app.mode = AppMode::Config;
 
         let result = handle_key_event(&mut app, key(KeyCode::Esc));
 
@@ -514,9 +522,9 @@ mod tests {
     }
 
     #[test]
-    fn test_help_mode_exit_enter() {
+    fn test_config_mode_exit_enter() {
         let mut app = create_test_app();
-        app.mode = AppMode::Help;
+        app.mode = AppMode::Config;
 
         let result = handle_key_event(&mut app, key(KeyCode::Enter));
 
@@ -525,14 +533,86 @@ mod tests {
     }
 
     #[test]
-    fn test_help_mode_exit_q() {
+    fn test_config_mode_exit_q() {
         let mut app = create_test_app();
-        app.mode = AppMode::Help;
+        app.mode = AppMode::Config;
 
         let result = handle_key_event(&mut app, key(KeyCode::Char('q')));
 
         assert!(matches!(result, InputResult::Continue));
         assert_eq!(app.mode, AppMode::Normal);
+    }
+
+    #[test]
+    fn test_config_mode_scroll_up() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Config;
+        app.config_scroll = 3;
+
+        handle_key_event(&mut app, key(KeyCode::Up));
+
+        assert_eq!(app.config_scroll, 2);
+    }
+
+    #[test]
+    fn test_config_mode_scroll_down() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Config;
+        app.config_scroll = 0;
+        app.config_scroll_max = 10;
+
+        handle_key_event(&mut app, key(KeyCode::Down));
+
+        assert_eq!(app.config_scroll, 1);
+    }
+
+    #[test]
+    fn test_config_mode_scroll_down_at_max() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Config;
+        app.config_scroll = 5;
+        app.config_scroll_max = 5;
+
+        handle_key_event(&mut app, key(KeyCode::Down));
+
+        assert_eq!(app.config_scroll, 5);
+    }
+
+    #[test]
+    fn test_config_mode_scroll_up_ctrl_p() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Config;
+        app.config_scroll = 3;
+
+        handle_key_event(&mut app, key_ctrl('p'));
+
+        assert_eq!(app.config_scroll, 2);
+    }
+
+    #[test]
+    fn test_config_mode_scroll_down_ctrl_n() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Config;
+        app.config_scroll = 0;
+        app.config_scroll_max = 10;
+
+        handle_key_event(&mut app, key_ctrl('n'));
+
+        assert_eq!(app.config_scroll, 1);
+    }
+
+    #[test]
+    fn test_config_mode_ignores_other_keys() {
+        let mut app = create_test_app();
+        app.mode = AppMode::Config;
+        app.config_scroll = 2;
+        app.config_scroll_max = 10;
+
+        let result = handle_key_event(&mut app, key(KeyCode::Char('x')));
+
+        assert!(matches!(result, InputResult::Continue));
+        assert_eq!(app.mode, AppMode::Config);
+        assert_eq!(app.config_scroll, 2);
     }
 
     // ========== Prune Tests ==========
