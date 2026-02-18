@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-02-18
+
+### Added
+- Replace help overlay with config viewer dialog
+- Add ConfigSources to expose per-level config info
+- Display mode-specific key bindings in footer for overlay dialogs
+
+### Changed
+- Move key hints into dialog borders using title_bottom
+
+### Fixed
+- Clear area around overlay dialogs for readable borders
+
 ## [0.4.1] - 2026-02-13
 
 ### Added
