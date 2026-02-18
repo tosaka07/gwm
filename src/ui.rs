@@ -40,14 +40,17 @@ pub fn draw(frame: &mut Frame, app: &App) {
         AppMode::Confirm => {
             draw_normal_mode(frame, app, area, colors);
             draw_confirm_dialog(frame, app, colors);
+            frame.render_widget(render_confirm_footer(colors), footer_area(area));
         }
         AppMode::Deleting => {
             draw_normal_mode(frame, app, area, colors);
             draw_deleting_dialog(frame, app, colors);
+            frame.render_widget(render_deleting_footer(colors), footer_area(area));
         }
         AppMode::Help => {
             draw_normal_mode(frame, app, area, colors);
             draw_help_dialog(frame, colors);
+            frame.render_widget(render_help_footer(colors), footer_area(area));
         }
     }
 }
@@ -479,6 +482,56 @@ fn render_create_footer(colors: &ThemeColors) -> Paragraph<'static> {
         Span::styled("C-c", Style::default().fg(colors.key)),
         Span::styled(": cancel", Style::default().fg(colors.description)),
     ]))
+}
+
+fn render_confirm_footer(colors: &ThemeColors) -> Paragraph<'static> {
+    Paragraph::new(Line::from(vec![
+        Span::styled("y", Style::default().fg(colors.key)),
+        Span::styled("/", Style::default().fg(colors.description)),
+        Span::styled("Enter", Style::default().fg(colors.key)),
+        Span::styled(": worktree  ", Style::default().fg(colors.description)),
+        Span::styled("Y", Style::default().fg(colors.key)),
+        Span::styled(
+            ": worktree & branch  ",
+            Style::default().fg(colors.description),
+        ),
+        Span::styled("n", Style::default().fg(colors.key)),
+        Span::styled("/", Style::default().fg(colors.description)),
+        Span::styled("Esc", Style::default().fg(colors.key)),
+        Span::styled(": cancel", Style::default().fg(colors.description)),
+    ]))
+}
+
+fn render_help_footer(colors: &ThemeColors) -> Paragraph<'static> {
+    Paragraph::new(Line::from(vec![
+        Span::styled("Esc", Style::default().fg(colors.key)),
+        Span::styled("/", Style::default().fg(colors.description)),
+        Span::styled("Enter", Style::default().fg(colors.key)),
+        Span::styled("/", Style::default().fg(colors.description)),
+        Span::styled("q", Style::default().fg(colors.key)),
+        Span::styled(": close help", Style::default().fg(colors.description)),
+    ]))
+}
+
+fn render_deleting_footer(colors: &ThemeColors) -> Paragraph<'static> {
+    Paragraph::new(Line::from(vec![Span::styled(
+        "Please wait...",
+        Style::default().fg(colors.text_muted),
+    )]))
+}
+
+/// Compute the footer Rect within the given area (matches draw_normal_mode layout)
+fn footer_area(area: Rect) -> Rect {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(3),
+            Constraint::Length(1),
+        ])
+        .split(area);
+    chunks[3]
 }
 
 fn draw_confirm_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
