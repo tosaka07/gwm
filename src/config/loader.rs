@@ -2,7 +2,7 @@ use crate::git::RepoInfo;
 use crate::theme::ThemeColorsConfig;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -139,6 +139,42 @@ pub struct Config {
     /// Top-level setup_commands (applies to all repositories when no specific repository_settings match)
     #[serde(default)]
     pub setup_commands: Option<Vec<String>>,
+}
+
+/// A configuration source with its file path
+#[derive(Debug, Clone)]
+pub struct ConfigSource {
+    /// Path to the config file (None if not found)
+    pub path: Option<PathBuf>,
+    /// The config loaded from this source
+    pub config: Config,
+}
+
+/// All configuration sources before merging
+#[derive(Debug, Clone)]
+pub struct ConfigSources {
+    /// Global (user-level) config
+    pub global: ConfigSource,
+    /// Local (project-level) config
+    pub local: ConfigSource,
+    /// Environment variable overrides
+    pub env: Config,
+}
+
+impl Default for ConfigSources {
+    fn default() -> Self {
+        Self {
+            global: ConfigSource {
+                path: None,
+                config: Config::default(),
+            },
+            local: ConfigSource {
+                path: None,
+                config: Config::default(),
+            },
+            env: Config::default(),
+        }
+    }
 }
 
 impl Config {
@@ -338,20 +374,22 @@ fn get_global_config_paths() -> Vec<std::path::PathBuf> {
 }
 
 /// Load global config from ~/.gwm.toml or $XDG_CONFIG_HOME/gwm/config.toml
-fn load_global_config() -> Result<Option<Config>, ConfigError> {
+/// Returns the config and the path it was loaded from
+fn load_global_config() -> Result<(Option<PathBuf>, Config), ConfigError> {
     for path in get_global_config_paths() {
         if path.exists() {
             let content = std::fs::read_to_string(&path)?;
             let config: Config = toml::from_str(&content)?;
-            return Ok(Some(config));
+            return Ok((Some(path), config));
         }
     }
 
-    Ok(None)
+    Ok((None, Config::default()))
 }
 
 /// Load local config from .gwm.toml in the current directory or parent directories
-fn load_local_config(start_path: &Path) -> Result<Option<Config>, ConfigError> {
+/// Returns the config and the path it was loaded from
+fn load_local_config(start_path: &Path) -> Result<(Option<PathBuf>, Config), ConfigError> {
     let mut current = start_path.to_path_buf();
 
     loop {
@@ -360,7 +398,7 @@ fn load_local_config(start_path: &Path) -> Result<Option<Config>, ConfigError> {
         if config_path.exists() {
             let content = std::fs::read_to_string(&config_path)?;
             let config: Config = toml::from_str(&content)?;
-            return Ok(Some(config));
+            return Ok((Some(config_path), config));
         }
 
         // Also check .gwm/config.toml (old format, for backwards compatibility)
@@ -368,7 +406,7 @@ fn load_local_config(start_path: &Path) -> Result<Option<Config>, ConfigError> {
         if old_config_path.exists() {
             let content = std::fs::read_to_string(&old_config_path)?;
             let config: Config = toml::from_str(&content)?;
-            return Ok(Some(config));
+            return Ok((Some(old_config_path), config));
         }
 
         if !current.pop() {
@@ -376,7 +414,7 @@ fn load_local_config(start_path: &Path) -> Result<Option<Config>, ConfigError> {
         }
     }
 
-    Ok(None)
+    Ok((None, Config::default()))
 }
 
 /// Load config from environment variables
@@ -424,20 +462,56 @@ fn load_config_from_path(path: &Path) -> Result<Config, ConfigError> {
 /// Load and merge configs (global + local + env)
 /// Priority: env > custom/local > global
 /// If custom_path is provided, it replaces both global and local config
-pub fn load_config(custom_path: Option<&Path>) -> Result<Config, ConfigError> {
+#[cfg(test)]
+fn load_config(custom_path: Option<&Path>) -> Result<Config, ConfigError> {
+    let (config, _sources) = load_config_with_sources(custom_path)?;
+    Ok(config)
+}
+
+/// Load and merge configs, also returning individual sources for display
+/// Priority: env > custom/local > global
+pub fn load_config_with_sources(
+    custom_path: Option<&Path>,
+) -> Result<(Config, ConfigSources), ConfigError> {
     let env = load_env_config();
 
     if let Some(path) = custom_path {
         let custom = load_config_from_path(path)?;
-        return Ok(custom.merge(env));
+        let merged = custom.clone().merge(env.clone());
+        let sources = ConfigSources {
+            global: ConfigSource {
+                path: Some(path.to_path_buf()),
+                config: custom,
+            },
+            local: ConfigSource {
+                path: None,
+                config: Config::default(),
+            },
+            env,
+        };
+        return Ok((merged, sources));
     }
 
     let current_dir = std::env::current_dir()?;
 
-    let global = load_global_config()?.unwrap_or_default();
-    let local = load_local_config(&current_dir)?.unwrap_or_default();
+    let (global_path, global) = load_global_config()?;
+    let (local_path, local) = load_local_config(&current_dir)?;
 
-    Ok(global.merge(local).merge(env))
+    let merged = global.clone().merge(local.clone()).merge(env.clone());
+
+    let sources = ConfigSources {
+        global: ConfigSource {
+            path: global_path,
+            config: global,
+        },
+        local: ConfigSource {
+            path: local_path,
+            config: local,
+        },
+        env,
+    };
+
+    Ok((merged, sources))
 }
 
 #[cfg(test)]
