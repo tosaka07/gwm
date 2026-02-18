@@ -40,17 +40,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
         AppMode::Confirm => {
             draw_normal_mode(frame, app, area, colors);
             draw_confirm_dialog(frame, app, colors);
-            frame.render_widget(render_confirm_footer(colors), footer_area(area));
         }
         AppMode::Deleting => {
             draw_normal_mode(frame, app, area, colors);
             draw_deleting_dialog(frame, app, colors);
-            frame.render_widget(render_deleting_footer(colors), footer_area(area));
         }
         AppMode::Help => {
             draw_normal_mode(frame, app, area, colors);
             draw_help_dialog(frame, colors);
-            frame.render_widget(render_help_footer(colors), footer_area(area));
         }
     }
 }
@@ -484,56 +481,6 @@ fn render_create_footer(colors: &ThemeColors) -> Paragraph<'static> {
     ]))
 }
 
-fn render_confirm_footer(colors: &ThemeColors) -> Paragraph<'static> {
-    Paragraph::new(Line::from(vec![
-        Span::styled("y", Style::default().fg(colors.key)),
-        Span::styled("/", Style::default().fg(colors.description)),
-        Span::styled("Enter", Style::default().fg(colors.key)),
-        Span::styled(": worktree  ", Style::default().fg(colors.description)),
-        Span::styled("Y", Style::default().fg(colors.key)),
-        Span::styled(
-            ": worktree & branch  ",
-            Style::default().fg(colors.description),
-        ),
-        Span::styled("n", Style::default().fg(colors.key)),
-        Span::styled("/", Style::default().fg(colors.description)),
-        Span::styled("Esc", Style::default().fg(colors.key)),
-        Span::styled(": cancel", Style::default().fg(colors.description)),
-    ]))
-}
-
-fn render_help_footer(colors: &ThemeColors) -> Paragraph<'static> {
-    Paragraph::new(Line::from(vec![
-        Span::styled("Esc", Style::default().fg(colors.key)),
-        Span::styled("/", Style::default().fg(colors.description)),
-        Span::styled("Enter", Style::default().fg(colors.key)),
-        Span::styled("/", Style::default().fg(colors.description)),
-        Span::styled("q", Style::default().fg(colors.key)),
-        Span::styled(": close help", Style::default().fg(colors.description)),
-    ]))
-}
-
-fn render_deleting_footer(colors: &ThemeColors) -> Paragraph<'static> {
-    Paragraph::new(Line::from(vec![Span::styled(
-        "Please wait...",
-        Style::default().fg(colors.text_muted),
-    )]))
-}
-
-/// Compute the footer Rect within the given area (matches draw_normal_mode layout)
-fn footer_area(area: Rect) -> Rect {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(3),
-            Constraint::Length(1),
-        ])
-        .split(area);
-    chunks[3]
-}
-
 fn draw_confirm_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
     let area = centered_rect(60, 30, frame.area());
 
@@ -558,20 +505,20 @@ fn draw_confirm_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
     };
 
     let shortcut_line = Line::from(vec![
-        Span::styled("y", Style::default().fg(colors.key)),
-        Span::styled(": worktree  ", Style::default().fg(colors.description)),
+        Span::styled(" y", Style::default().fg(colors.key)),
+        Span::styled(": worktree ", Style::default().fg(colors.description)),
         Span::styled("Y", Style::default().fg(colors.key)),
         Span::styled(
-            ": worktree & branch  ",
+            ": worktree & branch ",
             Style::default().fg(colors.description),
         ),
         Span::styled("n", Style::default().fg(colors.key)),
         Span::styled("/", Style::default().fg(colors.description)),
         Span::styled("Esc", Style::default().fg(colors.key)),
-        Span::styled(": cancel", Style::default().fg(colors.description)),
+        Span::styled(": cancel ", Style::default().fg(colors.description)),
     ]);
 
-    let mut lines: Vec<Line> = message
+    let lines: Vec<Line> = message
         .lines()
         .map(|l| {
             Line::from(Span::styled(
@@ -580,13 +527,12 @@ fn draw_confirm_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
             ))
         })
         .collect();
-    lines.push(Line::from(""));
-    lines.push(shortcut_line);
 
     let dialog = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
             .title("Confirm")
+            .title_bottom(shortcut_line)
             .style(Style::default().fg(colors.warning))
             .padding(Padding::horizontal(1)),
     );
@@ -605,6 +551,11 @@ fn draw_deleting_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
         app.deleting_message.as_deref().unwrap_or("Deleting...")
     );
 
+    let wait_hint = Line::from(vec![Span::styled(
+        " Please wait... ",
+        Style::default().fg(colors.text_muted),
+    )]);
+
     let dialog = Paragraph::new(Line::from(vec![Span::styled(
         message,
         Style::default().fg(colors.warning),
@@ -613,6 +564,7 @@ fn draw_deleting_dialog(frame: &mut Frame, app: &App, colors: &ThemeColors) {
         Block::default()
             .borders(Borders::ALL)
             .title("Processing")
+            .title_bottom(wait_hint)
             .style(Style::default().fg(colors.warning))
             .padding(Padding::horizontal(1)),
     );
@@ -693,17 +645,22 @@ fn draw_help_dialog(frame: &mut Frame, colors: &ThemeColors) {
             Span::styled("  Esc / C-q", Style::default().fg(colors.key)),
             Span::styled("   Quit / Cancel", Style::default().fg(colors.description)),
         ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "Press any key to close",
-            Style::default().fg(colors.text_muted),
-        )]),
     ];
+
+    let close_hint = Line::from(vec![
+        Span::styled(" Esc", Style::default().fg(colors.key)),
+        Span::styled("/", Style::default().fg(colors.description)),
+        Span::styled("Enter", Style::default().fg(colors.key)),
+        Span::styled("/", Style::default().fg(colors.description)),
+        Span::styled("q", Style::default().fg(colors.key)),
+        Span::styled(": close ", Style::default().fg(colors.description)),
+    ]);
 
     let dialog = Paragraph::new(help_text).block(
         Block::default()
             .borders(Borders::ALL)
             .title("Help")
+            .title_bottom(close_hint)
             .style(Style::default().fg(colors.header))
             .padding(Padding::horizontal(1)),
     );
